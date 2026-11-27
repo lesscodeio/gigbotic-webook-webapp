@@ -32,6 +32,7 @@ export const ENGINE_LLM_HOSTS = Object.freeze({
     "daily-cloudcode-pa.sandbox.googleapis.com",
     "autopush-cloudcode-pa.googleapis.com",
     "autopush-cloudcode-pa.sandbox.googleapis.com",
+    "aicode.googleapis.com",
     "play.googleapis.com",
     "oauth2.googleapis.com",
     "www.googleapis.com",

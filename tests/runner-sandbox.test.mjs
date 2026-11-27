@@ -15,6 +15,7 @@ import {
   resolveAndVerifyPublicIp,
 } from "../egress-proxy.mjs";
 import {
+  buildAgySessionSettings,
   buildAuthoritativeSystemPrompt,
   buildCodexIsolatedConfigToml,
   buildDockerContainerName,
@@ -97,15 +98,18 @@ describe("Layer 4 — CLI Sandbox Flag Matrix (zero --dangerously-* flags)", () 
           assert.ok(inv.args.includes("--sandbox"));
           assert.ok(inv.args.includes("--new-project"));
           assert.ok(inv.args.includes("--settings"));
+          assert.ok(!inv.args.includes("--mode"));
+          const agySettings = buildAgySessionSettings({ executionPolicy: policy });
+          assert.equal(agySettings.mcpServers, undefined, "agy --settings rejects mcpServers");
           if (sandboxMode === "mcp_only") {
-            assert.equal(inv.args[inv.args.indexOf("--mode") + 1], "plan");
+            assert.equal(agySettings.agentMode, "plan");
           }
         }
       });
     }
   }
 
-  it("Codex isolated config.toml embeds developer_instructions and disables shell in mcp_only", () => {
+  it("Codex isolated config.toml embeds developer_instructions, disables shell in mcp_only, and preserves egress proxy in Docker workspace_write", () => {
     const policy = normalizeExecutionPolicy({
       executionPolicy: { sandboxMode: "mcp_only", networkPolicy: "locked" },
     });
@@ -123,6 +127,64 @@ describe("Layer 4 — CLI Sandbox Flag Matrix (zero --dangerously-* flags)", () 
     assert.match(toml, /inherit = "none"/);
     assert.match(toml, /\[mcp_servers\.gigbotic\]/);
     assert.match(toml, /GIGBOTIC_MCP_TOKEN/);
+
+    const wsPolicy = normalizeExecutionPolicy({
+      executionPolicy: { sandboxMode: "workspace_write", networkPolicy: "public_web", allowShell: true },
+    });
+    const dockerToml = buildCodexIsolatedConfigToml({
+      mcpEndpoint: "https://gigbotic.com/mcp",
+      executionPolicy: wsPolicy,
+      systemPromptText: "sys",
+      inDocker: true,
+      proxyUrl: "http://job:tok@172.18.0.1:3455",
+    });
+    assert.match(dockerToml, /sandbox_mode = "danger-full-access"/);
+    assert.match(dockerToml, /HTTPS_PROXY = "http:\/\/job:tok@172\.18\.0\.1:3455"/);
+    const nativeToml = buildCodexIsolatedConfigToml({
+      mcpEndpoint: "https://gigbotic.com/mcp",
+      executionPolicy: wsPolicy,
+      systemPromptText: "sys",
+      inDocker: false,
+    });
+    assert.match(nativeToml, /sandbox_mode = "workspace-write"/);
+  });
+
+  it("Agy prepareHardenedJobEnvironment writes job-scoped MCP to .gemini/config/mcp_config.json and omits mcpServers from agy-settings.json", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gb-agy-env-"));
+    try {
+      const policy = normalizeExecutionPolicy({
+        executionPolicy: { sandboxMode: "workspace_write", networkPolicy: "public_web", allowShell: true },
+      });
+      const envSetup = prepareHardenedJobEnvironment({
+        isolatedRoot: path.join(tmpRoot, "iso"),
+        metaRoot: path.join(tmpRoot, "meta"),
+        realHomeDir: path.join(tmpRoot, "empty-home"),
+        jobId: "job_agy_1",
+        deliveryId: "whd_1",
+        engine: "agy",
+        model: "",
+        mcpEndpoint: "https://gigbotic.com/mcp",
+        jobMcpToken: "bw_job_agy_secret",
+        executionPolicy: policy,
+        coreFiles: { required: false, loaded: false, files: [], manifest: [] },
+        systemPromptText: "sys",
+        inDocker: true,
+      });
+      const settingsJson = JSON.parse(fs.readFileSync(envSetup.agySettingsPath, "utf8"));
+      assert.equal(settingsJson.mcpServers, undefined);
+      const mcpCfg = JSON.parse(
+        fs.readFileSync(path.join(envSetup.fakeHomeDir, ".gemini", "config", "mcp_config.json"), "utf8")
+      );
+      assert.equal(mcpCfg.mcpServers.gigbotic.serverUrl, "https://gigbotic.com/mcp");
+      assert.equal(mcpCfg.mcpServers.gigbotic.headers.Authorization, "Bearer bw_job_agy_secret");
+      const cliSettings = JSON.parse(
+        fs.readFileSync(path.join(envSetup.fakeHomeDir, ".gemini", "antigravity-cli", "settings.json"), "utf8")
+      );
+      assert.deepEqual(cliSettings.trustedWorkspaces, ["/workspace"]);
+      envSetup.cleanup();
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 
   it("normalizeExecutionPolicy lets local cap tighten cloud policy but never weaken it", () => {

@@ -691,6 +691,21 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
     agentName: wh.name,
   });
 
+  let proxyHandle = null;
+  if (useDocker) {
+    let mcpHost = "gigbotic.com";
+    try { mcpHost = new URL(mcpEndpoint).hostname.toLowerCase(); } catch {}
+    proxyHandle = dockerState.proxy.registerJobPolicy({
+      jobId,
+      deliveryId,
+      engine,
+      mcpHost,
+      networkPolicy: executionPolicy.networkPolicy,
+      allowExternalGitClone: executionPolicy.allowExternalGitClone,
+      allowedUploadHosts: executionPolicy.allowedUploadHosts,
+    });
+  }
+
   let hardenedEnv;
   try {
     hardenedEnv = prepareHardenedJobEnvironment({
@@ -708,8 +723,12 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
       coreFiles,
       systemPromptText,
       inDocker: useDocker,
+      proxyUrl: proxyHandle?.proxyUrl || null,
     });
   } catch (err) {
+    if (proxyHandle) {
+      try { proxyHandle.revoke(); } catch {}
+    }
     const msg = `[sandbox] Fail-closed workspace setup failed: ${err?.message || err}\n`;
     logStream.write(msg);
     logStream.end();
@@ -723,7 +742,6 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
 
   const prompt = buildIsolatedPrompt(notification, engine);
 
-  let proxyHandle = null;
   let containerName = null;
   let spawnBin;
   let spawnArgs;
@@ -731,17 +749,6 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
   let stdinPayload = null;
 
   if (useDocker) {
-    let mcpHost = "gigbotic.com";
-    try { mcpHost = new URL(mcpEndpoint).hostname.toLowerCase(); } catch {}
-    proxyHandle = dockerState.proxy.registerJobPolicy({
-      jobId,
-      deliveryId,
-      engine,
-      mcpHost,
-      networkPolicy: executionPolicy.networkPolicy,
-      allowExternalGitClone: executionPolicy.allowExternalGitClone,
-      allowedUploadHosts: executionPolicy.allowedUploadHosts,
-    });
     containerName = buildDockerContainerName(hardenedEnv.safeJobId, hardenedEnv.safeDeliveryId);
 
     const cliInv = buildHardenedCliInvocation({
@@ -754,6 +761,7 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
       mcpConfigPath: hardenedEnv.containerPaths.mcpConfigPath,
       agySettingsPath: hardenedEnv.containerPaths.agySettingsPath,
       executionPolicy,
+      inDocker: true,
       useStdinForCodex: true,
     });
     stdinPayload = cliInv.stdinPayload;
