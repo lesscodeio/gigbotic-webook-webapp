@@ -782,6 +782,67 @@ function stripAnsiForWeb(text) {
     .replace(/\r/g, "\n");
 }
 
+function extractDetectedUrls(rawText) {
+  const found = [];
+  const raw = String(rawText || "");
+
+  // 1. Extract complete, unwrapped OSC 8 terminal hyperlinks (used by agy, claude, modern CLIs)
+  const osc8Re = /\x1b\]8;[^;\x07\x1b]*;(https?:\/\/[^\x07\x1b\s]+)(?:\x07|\x1b\\)/g;
+  let m;
+  while ((m = osc8Re.exec(raw)) !== null) {
+    const u = m[1].replace(/[.,;)\]]+$/, "");
+    if (u.startsWith("http://") || u.startsWith("https://")) found.push(u);
+  }
+
+  // 2. Also extract URLs from stripped text, re-joining soft-wrapped URL continuation lines
+  const clean = stripAnsiForWeb(raw);
+  const lines = clean.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const startMatch = /(https?:\/\/[^\s<>"')\]]+)/.exec(lines[i]);
+    if (!startMatch) continue;
+    let candidate = startMatch[1];
+    // Join continuation lines if the URL reached near the end of a wrapped line
+    // and the next line looks like a URL continuation (no sentence spaces, valid URL chars)
+    let j = i + 1;
+    while (j < lines.length) {
+      const nextTrimmed = lines[j].trim();
+      if (
+        !nextTrimmed ||
+        /\s/.test(nextTrimmed) ||
+        /^[-─━═_│┃┌┐└┘├┤┬┴┼]+$/.test(nextTrimmed) ||
+        nextTrimmed.startsWith("http://") ||
+        nextTrimmed.startsWith("https://")
+      ) {
+        break;
+      }
+      if (/^[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/.test(nextTrimmed) && (candidate.includes("?") || candidate.length >= 40)) {
+        candidate += nextTrimmed;
+        j += 1;
+      } else {
+        break;
+      }
+    }
+    candidate = candidate.replace(/[.,;)\]]+$/, "");
+    if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+      found.push(candidate);
+    }
+  }
+
+  // Deduplicate and drop truncated prefixes when a longer exact URL containing that prefix exists
+  const unique = [...new Set(found)];
+  const deduped = unique.filter(
+    (u) => !unique.some((other) => other.length > u.length && other.startsWith(u))
+  );
+
+  // Prioritize OAuth / login URLs first
+  const authScore = (u) =>
+    /accounts\.google\.com|oauth|authorize|device|login|claude\.ai|anthropic\.com|openai\.com|chatgpt\.com|gigbotic\.com\/oauth/i.test(u)
+      ? 0
+      : 1;
+  deduped.sort((a, b) => authScore(a) - authScore(b) || b.length - a.length);
+  return deduped.slice(0, 6);
+}
+
 function runQuickProbe(binName, args, timeoutMs = 4500) {
   return new Promise((resolve) => {
     const full = path.join(BIN_DIR, binName);
@@ -948,7 +1009,9 @@ function startCliSession(command, requestedCwd) {
     exitCode: null,
     startedAt,
     finishedAt: null,
+    rawOutput: `$ ${cmd}\n`,
     output: `$ ${cmd}\n`,
+    detectedUrls: [],
     child,
     idleTimer: null,
   };
@@ -957,7 +1020,8 @@ function startCliSession(command, requestedCwd) {
     if (rec.idleTimer) clearTimeout(rec.idleTimer);
     rec.idleTimer = setTimeout(() => {
       if (rec.status === "running") {
-        rec.output += "\n[Stopped: 10-minute idle timeout]\n";
+        rec.rawOutput += "\n[Stopped: 10-minute idle timeout]\n";
+        rec.output = stripAnsiForWeb(rec.rawOutput);
         stopCliSession(rec.id);
       }
     }, CLI_IDLE_TIMEOUT_MS);
@@ -967,12 +1031,16 @@ function startCliSession(command, requestedCwd) {
 
   const pushChunk = (raw) => {
     resetIdle();
-    const cleaned = stripAnsiForWeb(raw.toString("utf8"));
-    rec.output += cleaned;
+    rec.rawOutput += raw.toString("utf8");
+    if (rec.rawOutput.length > MAX_CLI_OUTPUT_CHARS * 2) {
+      rec.rawOutput = rec.rawOutput.slice(-(MAX_CLI_OUTPUT_CHARS * 2));
+    }
+    rec.output = stripAnsiForWeb(rec.rawOutput);
     if (rec.output.length > MAX_CLI_OUTPUT_CHARS) {
       rec.output = rec.output.slice(-MAX_CLI_OUTPUT_CHARS);
     }
-    broadcast("cli-output", { id: rec.id, text: cleaned });
+    rec.detectedUrls = extractDetectedUrls(rec.rawOutput);
+    broadcast("cli-output", { id: rec.id, fullOutput: rec.output, detectedUrls: rec.detectedUrls });
   };
 
   child.stdout?.on("data", pushChunk);
@@ -986,8 +1054,10 @@ function startCliSession(command, requestedCwd) {
     rec.exitCode = code ?? (signal ? 130 : 1);
     rec.status = rec.stoppedByUser ? "stopped" : code === 0 ? "completed" : "failed";
     const footer = `\n[Exited code=${rec.exitCode}]\n`;
-    rec.output += footer;
-    broadcast("cli-output", { id: rec.id, text: footer });
+    rec.rawOutput += footer;
+    rec.output = stripAnsiForWeb(rec.rawOutput);
+    rec.detectedUrls = extractDetectedUrls(rec.rawOutput);
+    broadcast("cli-output", { id: rec.id, fullOutput: rec.output, detectedUrls: rec.detectedUrls });
     broadcastCliSessions();
   };
 
@@ -1363,7 +1433,13 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await readJsonBody(req);
       const rec = startCliSession(body.command, body.cwd);
-      sendJson(res, 202, { ok: true, session: summarizeCliSession(rec), output: rec.output, sessions: listCliSessionsSummary() });
+      sendJson(res, 202, {
+        ok: true,
+        session: summarizeCliSession(rec),
+        output: rec.output,
+        detectedUrls: rec.detectedUrls,
+        sessions: listCliSessionsSummary(),
+      });
       return;
     }
 
@@ -1374,7 +1450,12 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { ok: false, error: "CLI session not found." });
         return;
       }
-      sendJson(res, 200, { ok: true, session: summarizeCliSession(rec), output: rec.output });
+      sendJson(res, 200, {
+        ok: true,
+        session: summarizeCliSession(rec),
+        output: rec.output,
+        detectedUrls: rec.detectedUrls || [],
+      });
       return;
     }
 
