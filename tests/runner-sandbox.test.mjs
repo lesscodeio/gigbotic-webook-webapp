@@ -129,6 +129,7 @@ describe("Layer 4 — CLI Sandbox Flag Matrix (zero --dangerously-* flags)", () 
     assert.match(toml, /inherit = "none"/);
     assert.match(toml, /\[mcp_servers\.gigbotic\]/);
     assert.match(toml, /GIGBOTIC_MCP_TOKEN/);
+    assert.match(toml, /default_tools_approval_mode = "approve"/);
 
     const wsPolicy = normalizeExecutionPolicy({
       executionPolicy: { sandboxMode: "workspace_write", networkPolicy: "public_web", allowShell: true },

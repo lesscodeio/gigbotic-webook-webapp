@@ -841,6 +841,7 @@ export function buildCodexIsolatedConfigToml({
   lines.push(`url = ${JSON.stringify(mcpEndpoint)}`);
   lines.push("enabled = true");
   lines.push('bearer_token_env_var = "GIGBOTIC_MCP_TOKEN"');
+  lines.push('default_tools_approval_mode = "approve"');
   lines.push("");
 
   return lines.join("\n");
