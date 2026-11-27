@@ -215,6 +215,15 @@ export function buildSanitizedChildEnv(hostEnv = process.env, options = {}) {
   }
   if (!env.LANG) env.LANG = "C.UTF-8";
 
+  // macOS Security.framework / Keychain lookups require USER/LOGNAME when HOME is isolated
+  if (process.platform === "darwin" && !options.inDocker) {
+    for (const key of ["USER", "LOGNAME"]) {
+      if (typeof hostEnv[key] === "string" && hostEnv[key]) {
+        env[key] = hostEnv[key];
+      }
+    }
+  }
+
   // Windows requires SystemRoot/COMSPEC/PATHEXT for child processes & DNS
   if (IS_WIN) {
     for (const key of ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE"]) {
@@ -786,9 +795,6 @@ export function buildCodexIsolatedConfigToml({
   }
   lines.push(`developer_instructions = ${tomlTripleQuote(systemPromptText)}`);
   lines.push("");
-  lines.push("[agents]");
-  lines.push("enabled = false");
-  lines.push("");
   lines.push("[features]");
   lines.push(`shell_tool = ${allowShell ? "true" : "false"}`);
   lines.push(`unified_exec = ${allowShell ? "true" : "false"}`);
@@ -797,6 +803,7 @@ export function buildCodexIsolatedConfigToml({
   lines.push("in_app_browser = false");
   lines.push("computer_use = false");
   lines.push("image_generation = false");
+  lines.push("multi_agent = false");
   lines.push("hooks = false");
   lines.push("plugins = false");
   lines.push("apps = false");
@@ -909,11 +916,11 @@ export function buildAgySessionSettings({ executionPolicy }) {
  * `~/.codex/AGENTS.md`, `~/.codex/memories*`, `~/.claude/projects`, or
  * `data/webhooks.json`.
  */
-function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir }) {
+function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir, inDocker = false }) {
   const mountedAuthFiles = [];
   if (!realHomeDir || !fakeHomeDir) return mountedAuthFiles;
 
-  const copySingleReadOnly = (src, relDst) => {
+  const copySingleAuthFile = (src, relDst) => {
     if (!fs.existsSync(src)) return false;
     try {
       const st = fs.statSync(src);
@@ -921,7 +928,8 @@ function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir }) {
       const dst = path.join(fakeHomeDir, relDst);
       fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
       fs.copyFileSync(src, dst);
-      safeChmod(dst, 0o400);
+      // 0600 (owner rw) on the ephemeral copy so CLIs can refresh expired OAuth tokens in fake-home
+      safeChmod(dst, 0o600);
       mountedAuthFiles.push({ hostPath: src, fakeRelPath: relDst });
       return true;
     } catch {
@@ -930,13 +938,13 @@ function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir }) {
   };
 
   if (engine === "codex") {
-    copySingleReadOnly(path.join(realHomeDir, ".codex", "auth.json"), path.join(".codex", "auth.json"));
+    copySingleAuthFile(path.join(realHomeDir, ".codex", "auth.json"), path.join(".codex", "auth.json"));
   } else if (engine === "claude") {
-    copySingleReadOnly(
+    copySingleAuthFile(
       path.join(realHomeDir, ".claude", ".credentials.json"),
       path.join(".claude", ".credentials.json")
     );
-    copySingleReadOnly(path.join(realHomeDir, ".claude.json"), ".claude.json");
+    copySingleAuthFile(path.join(realHomeDir, ".claude.json"), ".claude.json");
   } else if (engine === "agy") {
     for (const rel of [
       path.join(".gemini", "antigravity-cli", "antigravity-oauth-token"),
@@ -946,7 +954,29 @@ function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir }) {
       path.join(".gemini", "antigravity-cli", "credentials.json"),
       path.join(".gemini", "oauth_creds.json"),
     ]) {
-      copySingleReadOnly(path.join(realHomeDir, rel), rel);
+      copySingleAuthFile(path.join(realHomeDir, rel), rel);
+    }
+  }
+
+  // On native macOS runs (non-Docker), Claude Code and Antigravity store OAuth tokens
+  // in macOS Login Keychain, which Security.framework resolves under `$HOME/Library/Keychains`.
+  // Symlink ONLY `Library/Keychains` (never `~/.ssh`, `~/.claude`, or other host folders)
+  // so macOS Keychain ACLs let signed `claude`/`agy` binaries authenticate cleanly.
+  if (
+    process.platform === "darwin" &&
+    !inDocker &&
+    (engine === "claude" || engine === "agy")
+  ) {
+    const realKeychains = path.join(realHomeDir, "Library", "Keychains");
+    if (fs.existsSync(realKeychains)) {
+      try {
+        const fakeLibrary = path.join(fakeHomeDir, "Library");
+        const fakeKeychains = path.join(fakeLibrary, "Keychains");
+        fs.mkdirSync(fakeLibrary, { recursive: true, mode: 0o700 });
+        if (!fs.existsSync(fakeKeychains)) {
+          fs.symlinkSync(realKeychains, fakeKeychains, "dir");
+        }
+      } catch {}
     }
   }
 
@@ -1003,6 +1033,7 @@ export function prepareHardenedJobEnvironment({
     engine,
     realHomeDir,
     fakeHomeDir,
+    inDocker,
   });
 
   // Materialize read-only pinned core files (0444) into workDir
@@ -1175,6 +1206,13 @@ export function prepareHardenedJobEnvironment({
   }
 
   const cleanup = () => {
+    // Explicitly unlink macOS Keychains symlink before tree chmod/removal
+    try {
+      const fakeKeychains = path.join(fakeHomeDir, "Library", "Keychains");
+      if (fs.lstatSync(fakeKeychains).isSymbolicLink()) {
+        fs.unlinkSync(fakeKeychains);
+      }
+    } catch {}
     makeTreeWritable(metaDir);
     try {
       fs.rmSync(metaDir, { recursive: true, force: true });
