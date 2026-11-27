@@ -1518,9 +1518,27 @@ export function buildDockerRunArgs({
   stdinInteractive = false,
 }) {
   const isWritable = executionPolicy.sandboxMode === "workspace_write";
+  // Scale workspace_write container limits safely to host capacity so media/video/build
+  // agents (FFmpeg + Python/Pillow + headless browser + CLI runtime) do not get OOM-killed (exit 137).
+  const hostMemGb = Math.max(2, Math.floor(os.totalmem() / (1024 ** 3)));
+  const defaultWritableMemGb = Math.max(2, Math.min(8, Math.floor(hostMemGb * 0.55)));
+  const memoryLimit =
+    String(process.env.GIGBOTIC_DOCKER_MEMORY || "").trim() ||
+    (isWritable ? `${defaultWritableMemGb}g` : "2g");
+  const cpuLimit =
+    String(process.env.GIGBOTIC_DOCKER_CPUS || "").trim() ||
+    String(isWritable ? Math.min(4, Math.max(2, os.cpus().length || 2)) : 2);
+  const pidsLimit =
+    String(process.env.GIGBOTIC_DOCKER_PIDS_LIMIT || "").trim() ||
+    (isWritable ? "512" : "128");
+  const tmpfsSize =
+    String(process.env.GIGBOTIC_DOCKER_TMPFS_SIZE || "").trim() ||
+    (isWritable ? "1g" : "256m");
+  const fsizeLimit = isWritable ? "2147483648:2147483648" : "524288000:524288000";
+
   const tmpfsOpts = isWritable
-    ? "/tmp:rw,nosuid,nodev,size=256m"
-    : "/tmp:rw,noexec,nosuid,nodev,size=256m";
+    ? `/tmp:rw,nosuid,nodev,size=${tmpfsSize}`
+    : `/tmp:rw,noexec,nosuid,nodev,size=${tmpfsSize}`;
 
   const args = [
     "run",
@@ -1546,17 +1564,17 @@ export function buildDockerRunArgs({
     "--security-opt",
     "no-new-privileges:true",
     "--pids-limit",
-    "128",
+    pidsLimit,
     "--memory",
-    "2g",
+    memoryLimit,
     "--memory-swap",
-    "2g",
+    memoryLimit,
     "--cpus",
-    "2",
+    cpuLimit,
     "--ulimit",
-    "nofile=1024:2048",
+    "nofile=2048:4096",
     "--ulimit",
-    "fsize=524288000:524288000",
+    `fsize=${fsizeLimit}`,
     "--network",
     networkName,
   ];
