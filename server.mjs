@@ -12,6 +12,25 @@ import { spawn, execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createWebhookHandler, startRelayReceiver } from "./gigbotic-webhook-receiver.mjs";
+import { createEgressProxyServer } from "./egress-proxy.mjs";
+import {
+  DEFAULT_RUNNER_VERSION,
+  SANDBOX_NETWORK_NAME,
+  buildAuthoritativeSystemPrompt,
+  buildDockerContainerName,
+  buildDockerRunArgs,
+  buildHardenedCliInvocation,
+  buildRunnerSecurityTelemetry,
+  buildSanitizedChildEnv,
+  ensureDockerSandboxNetwork,
+  killDockerContainer,
+  normalizeExecutionPolicy,
+  prefetchPinnedCoreFiles,
+  prepareHardenedJobEnvironment,
+  probeDockerAvailability,
+  resolveSandboxDriverConfig,
+  sweepOrphanedDockerContainers,
+} from "./runner-sandbox.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOME_DIR = process.env.HOME || os.homedir();
@@ -20,13 +39,61 @@ const DATA_DIR = path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const JOB_LOGS_DIR = path.join(__dirname, "logs", "jobs");
 const ISOLATED_ROOT = path.join(HOME_DIR, ".gigbotic", "isolated-jobs");
+const RUNNER_META_ROOT = path.join(HOME_DIR, ".gigbotic", "runner-meta");
+const CORE_FILES_CACHE_ROOT = path.join(HOME_DIR, ".gigbotic", "core-files-cache");
 const WEBHOOKS_FILE = path.join(DATA_DIR, "webhooks.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const AUTH_FILE = path.join(DATA_DIR, "auth.json");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(JOB_LOGS_DIR, { recursive: true });
-fs.mkdirSync(ISOLATED_ROOT, { recursive: true });
+fs.mkdirSync(ISOLATED_ROOT, { recursive: true, mode: 0o700 });
+fs.mkdirSync(RUNNER_META_ROOT, { recursive: true, mode: 0o700 });
+fs.mkdirSync(CORE_FILES_CACHE_ROOT, { recursive: true, mode: 0o700 });
+
+const SANDBOX_DRIVER_CFG = resolveSandboxDriverConfig(process.env, "auto");
+let dockerEgressProxy = null;
+let dockerGatewayIp = null;
+
+async function ensureDockerRuntimeReady() {
+  if (SANDBOX_DRIVER_CFG.mode === "native") {
+    return { ready: false, reason: "native_configured" };
+  }
+  const probe = probeDockerAvailability(SANDBOX_DRIVER_CFG.image);
+  if (!probe.available) {
+    return { ready: false, reason: probe.reason };
+  }
+  if (!dockerGatewayIp) {
+    try {
+      dockerGatewayIp = ensureDockerSandboxNetwork(SANDBOX_NETWORK_NAME);
+    } catch (err) {
+      return { ready: false, reason: `network_error: ${err?.message || err}` };
+    }
+  }
+  if (!dockerEgressProxy) {
+    const proxyPort = Number(process.env.GIGBOTIC_EGRESS_PROXY_PORT || 0);
+    const proxy = createEgressProxyServer({
+      bindHost: dockerGatewayIp,
+      port: Number.isInteger(proxyPort) ? proxyPort : 0,
+      onBlocked: (info) => {
+        console.warn(
+          `[egress-blocked] job=${info.jobId || "?"} delivery=${info.deliveryId || "?"} host=${info.host}:${info.port} reason=${info.reason}`
+        );
+      },
+    });
+    await proxy.start();
+    dockerEgressProxy = proxy;
+  }
+  return { ready: true, gatewayIp: dockerGatewayIp, proxy: dockerEgressProxy };
+}
+
+// Sweep any orphaned containers left from an unexpected relay crash on startup
+if (SANDBOX_DRIVER_CFG.mode !== "native") {
+  const swept = sweepOrphanedDockerContainers();
+  if (swept > 0) {
+    console.log(`[sandbox] Swept ${swept} orphaned Gigbotic sandbox container(s) on boot.`);
+  }
+}
 
 const UI_HOST = process.env.UI_HOST || "127.0.0.1";
 const UI_PORT = Number(process.env.UI_PORT || 3450);
@@ -420,10 +487,17 @@ function stopRunByDeliveryId(deliveryId, reason = "Stopped by user") {
     if (rec.deliveryId === deliveryId) {
       rec.stoppedByUser = true;
       rec.stopReason = reason;
+      if (rec.proxyHandle) {
+        try { rec.proxyHandle.revoke(); } catch {}
+      }
+      if (rec.containerName) {
+        killDockerContainer(rec.containerName);
+      }
       try { process.kill(-rec.child.pid, "SIGTERM"); } catch {
         try { rec.child.kill("SIGTERM"); } catch {}
       }
       setTimeout(() => {
+        if (rec.containerName) killDockerContainer(rec.containerName);
         try { process.kill(-rec.child.pid, "SIGKILL"); } catch {}
       }, 3500).unref();
       return true;
@@ -481,6 +555,16 @@ function enqueueJob(wh, notification) {
     return;
   }
 
+  if (event === "job.turn_stopped") {
+    for (let i = pendingQueue.length - 1; i >= 0; i -= 1) {
+      if (pendingQueue[i].jobKey === jobKey) pendingQueue.splice(i, 1);
+    }
+    stopActiveJobKey(jobKey, `Turn stopped by client (${jobId})`);
+    drainQueue();
+    broadcastRuns();
+    return;
+  }
+
   const existingIdx = pendingQueue.findIndex(
     (q) => q.jobKey === jobKey && q.notification?.event !== "job.cancel_requested"
   );
@@ -511,95 +595,255 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
   const event = String(notification?.event || "job.wakeup");
   const engine = (wh.engine === "claude" || wh.engine === "agy") ? wh.engine : "codex";
   const model = String(wh.model || "").trim();
-
   const safeJobDir = jobId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const workDir = path.join(ISOLATED_ROOT, safeJobDir);
-  fs.mkdirSync(workDir, { recursive: true });
+  const workerRef = `managed_relay_${engine}_${jobId}`;
 
   const mcpEndpoint = String(notification.mcpEndpoint || wh.mcpEndpoint || settings.mcpEndpoint || "https://gigbotic.com/mcp");
   const jobMcpToken = typeof notification.jobMcpToken === "string" && notification.jobMcpToken.trim()
     ? notification.jobMcpToken.trim()
     : "";
-  const prompt = buildIsolatedPrompt(notification, engine);
+
+  const executionPolicy = normalizeExecutionPolicy(notification, {
+    defaultSandboxMode: wh.defaultSandboxMode || "mcp_only",
+    maxSandboxMode: wh.maxSandboxMode || undefined,
+    mcpEndpoint,
+  });
 
   const logFile = path.join(JOB_LOGS_DIR, `${safeJobDir}_${deliveryId.replace(/[^a-zA-Z0-9_-]/g, "_")}.log`);
   const logStream = fs.createWriteStream(logFile, { flags: "a" });
   const startedAt = new Date().toISOString();
 
-  const childEnv = {
-    ...process.env,
-    HOME: HOME_DIR,
-    XDG_CONFIG_HOME: path.join(HOME_DIR, ".config"),
-    XDG_CACHE_HOME: path.join(HOME_DIR, ".cache"),
-    XDG_DATA_HOME: path.join(HOME_DIR, ".local", "share"),
-    PATH: `${BIN_DIR}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
-    ...(jobMcpToken ? { GIGBOTIC_MCP_TOKEN: jobMcpToken } : {}),
-  };
-
-  let bin;
-  let args;
-  let stdinPayload = null;
-  let tempMcpPath = null;
-
-  if (engine === "codex") {
-    bin = path.join(BIN_DIR, "codex");
-    const mcpOverrides = buildCodexMcpOverrides(mcpEndpoint, jobMcpToken);
-    args = [
-      ...mcpOverrides,
-      "exec",
-      "-C",
-      workDir,
-      "--dangerously-bypass-approvals-and-sandbox",
-      "--skip-git-repo-check",
-    ];
-    if (model) args.push("-m", model);
-    args.push("-");
-    stdinPayload = prompt;
-  } else if (engine === "claude") {
-    bin = path.join(BIN_DIR, "claude");
-    args = ["--dangerously-skip-permissions", "--verbose"];
-    if (model) args.push("--model", model);
-    if (jobMcpToken) {
-      tempMcpPath = path.join(workDir, ".gigbotic-mcp.json");
-      fs.writeFileSync(
-        tempMcpPath,
-        JSON.stringify({
-          mcpServers: {
-            gigbotic: {
-              type: "http",
-              url: mcpEndpoint,
-              headers: { Authorization: `Bearer ${jobMcpToken}` },
-            },
-          },
-        }, null, 2),
-        { mode: 0o600 }
-      );
-      args.push("--strict-mcp-config", "--mcp-config", tempMcpPath);
-    }
-    args.push("-p", prompt);
-  } else {
-    bin = path.join(BIN_DIR, "agy");
-    args = ["--dangerously-skip-permissions"];
-    if (model) args.push("--model", model);
-    args.push("-p", prompt);
-  }
-
   activeCount += 1;
   upsertRunStmt.run(deliveryId, wh.id, wh.name, jobId, agentId, event, engine, "running", null, startedAt, null, logFile);
   runOutputs.set(deliveryId, "");
-  const header = `[${startedAt}] Agent="${wh.name}" engine=${engine}${model ? ` model=${model}` : ""} job=${jobId} event=${event}\n$ ${path.basename(bin)} ${args.slice(0, -1).join(" ")} "<prompt>"\n\n`;
+
+  let useDocker = false;
+  let dockerState = { ready: false, reason: "native_configured" };
+  try {
+    dockerState = await ensureDockerRuntimeReady();
+    useDocker = dockerState.ready;
+  } catch (err) {
+    dockerState = { ready: false, reason: err?.message || String(err) };
+    useDocker = false;
+  }
+
+  if (
+    !useDocker &&
+    (SANDBOX_DRIVER_CFG.mode === "docker" ||
+      (SANDBOX_DRIVER_CFG.requireDocker && executionPolicy.sandboxMode === "workspace_write"))
+  ) {
+    const errMsg = `[sandbox] Fail-closed: Docker sandbox required (${dockerState.reason}) — aborting job ${jobId}.\n`;
+    logStream.write(errMsg);
+    logStream.end();
+    appendRunOutput(deliveryId, errMsg);
+    activeCount = Math.max(0, activeCount - 1);
+    upsertRunStmt.run(deliveryId, wh.id, wh.name, jobId, agentId, event, engine, "failed", 1, startedAt, new Date().toISOString(), logFile);
+    broadcastRuns();
+    drainQueue();
+    return;
+  }
+
+  const sandboxDriver = useDocker ? "docker" : "cli_sandbox";
+  const runnerSecurity = buildRunnerSecurityTelemetry({
+    sandboxDriver,
+    sandboxMode: executionPolicy.sandboxMode,
+    egressProxyActive: useDocker,
+    fakeHomeIsolated: true,
+    coreFilesElevated: true,
+    runnerType: "managed_relay_webapp",
+    runnerVersion: DEFAULT_RUNNER_VERSION,
+    cliEngine: engine,
+  });
+
+  // Layer 3: Pre-spawn stateless JSON-RPC read_agent_core_files + SHA-256 verification
+  let coreFiles = { required: false, loaded: false, files: [], manifest: [], bundleHash: null, agentVersion: 1 };
+  if (event !== "manual.test" && jobMcpToken && agentId) {
+    try {
+      coreFiles = await prefetchPinnedCoreFiles({
+        mcpEndpoint,
+        jobMcpToken,
+        agentId,
+        jobId,
+        coreFilesMeta: notification?.agent?.coreFiles || null,
+        workerReference: workerRef,
+        runnerSecurity,
+        cacheRoot: CORE_FILES_CACHE_ROOT,
+      });
+    } catch (err) {
+      const msg = `[sandbox] Fail-closed preflight abort: ${err?.message || err}\n`;
+      logStream.write(msg);
+      logStream.end();
+      appendRunOutput(deliveryId, msg);
+      activeCount = Math.max(0, activeCount - 1);
+      upsertRunStmt.run(deliveryId, wh.id, wh.name, jobId, agentId, event, engine, "failed", 1, startedAt, new Date().toISOString(), logFile);
+      broadcastRuns();
+      drainQueue();
+      return;
+    }
+  }
+
+  const systemPromptText = buildAuthoritativeSystemPrompt({
+    executionPolicy,
+    coreFiles,
+    jobId,
+    agentId,
+    workerReference: workerRef,
+    agentName: wh.name,
+  });
+
+  let hardenedEnv;
+  try {
+    hardenedEnv = prepareHardenedJobEnvironment({
+      isolatedRoot: ISOLATED_ROOT,
+      metaRoot: RUNNER_META_ROOT,
+      realHomeDir: HOME_DIR,
+      baseWorkspaceDir: null,
+      jobId,
+      deliveryId,
+      engine,
+      model,
+      mcpEndpoint,
+      jobMcpToken,
+      executionPolicy,
+      coreFiles,
+      systemPromptText,
+      inDocker: useDocker,
+    });
+  } catch (err) {
+    const msg = `[sandbox] Fail-closed workspace setup failed: ${err?.message || err}\n`;
+    logStream.write(msg);
+    logStream.end();
+    appendRunOutput(deliveryId, msg);
+    activeCount = Math.max(0, activeCount - 1);
+    upsertRunStmt.run(deliveryId, wh.id, wh.name, jobId, agentId, event, engine, "failed", 1, startedAt, new Date().toISOString(), logFile);
+    broadcastRuns();
+    drainQueue();
+    return;
+  }
+
+  const prompt = buildIsolatedPrompt(notification, engine);
+
+  let proxyHandle = null;
+  let containerName = null;
+  let spawnBin;
+  let spawnArgs;
+  let spawnEnv;
+  let stdinPayload = null;
+
+  if (useDocker) {
+    let mcpHost = "gigbotic.com";
+    try { mcpHost = new URL(mcpEndpoint).hostname.toLowerCase(); } catch {}
+    proxyHandle = dockerState.proxy.registerJobPolicy({
+      jobId,
+      deliveryId,
+      engine,
+      mcpHost,
+      networkPolicy: executionPolicy.networkPolicy,
+      allowExternalGitClone: executionPolicy.allowExternalGitClone,
+      allowedUploadHosts: executionPolicy.allowedUploadHosts,
+    });
+    containerName = buildDockerContainerName(hardenedEnv.safeJobId, hardenedEnv.safeDeliveryId);
+
+    const cliInv = buildHardenedCliInvocation({
+      engine,
+      bin: engine,
+      model,
+      prompt,
+      workDir: hardenedEnv.containerPaths.workDir,
+      systemPromptPath: hardenedEnv.containerPaths.systemPromptPath,
+      mcpConfigPath: hardenedEnv.containerPaths.mcpConfigPath,
+      agySettingsPath: hardenedEnv.containerPaths.agySettingsPath,
+      executionPolicy,
+      useStdinForCodex: true,
+    });
+    stdinPayload = cliInv.stdinPayload;
+    spawnBin = "docker";
+    spawnArgs = buildDockerRunArgs({
+      containerName,
+      image: SANDBOX_DRIVER_CFG.image,
+      gpus: SANDBOX_DRIVER_CFG.gpus,
+      networkName: SANDBOX_NETWORK_NAME,
+      workDir: hardenedEnv.workDir,
+      fakeHomeDir: hardenedEnv.fakeHomeDir,
+      systemPromptPath: hardenedEnv.systemPromptPath,
+      mcpConfigPath: hardenedEnv.mcpConfigPath,
+      agySettingsPath: hardenedEnv.agySettingsPath,
+      readOnlyBindMounts: hardenedEnv.readOnlyBindMounts,
+      executionPolicy,
+      jobId,
+      deliveryId,
+      workerReference: workerRef,
+      mcpEndpoint,
+      jobMcpToken,
+      proxyUrl: proxyHandle.proxyUrl,
+      cliCommand: cliInv.bin,
+      cliArgs: cliInv.args,
+      stdinInteractive: stdinPayload !== null,
+    });
+    // Docker CLI runs on host with minimal host PATH only
+    spawnEnv = {
+      PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+      HOME: HOME_DIR,
+    };
+  } else {
+    const cliInv = buildHardenedCliInvocation({
+      engine,
+      bin: path.join(BIN_DIR, engine),
+      model,
+      prompt,
+      workDir: hardenedEnv.workDir,
+      systemPromptPath: hardenedEnv.systemPromptPath,
+      mcpConfigPath: hardenedEnv.mcpConfigPath,
+      agySettingsPath: hardenedEnv.agySettingsPath,
+      executionPolicy,
+      useStdinForCodex: true,
+    });
+    spawnBin = cliInv.bin;
+    spawnArgs = cliInv.args;
+    stdinPayload = cliInv.stdinPayload;
+    spawnEnv = buildSanitizedChildEnv(process.env, {
+      sandboxMode: executionPolicy.sandboxMode,
+      fakeHomeDir: hardenedEnv.fakeHomeDir,
+      tmpDir: hardenedEnv.tmpDir,
+      codexHome: hardenedEnv.codexHomeDir,
+      binDir: BIN_DIR,
+      jobId,
+      workerReference: workerRef,
+      mcpEndpoint,
+      jobMcpToken,
+      inDocker: false,
+    });
+  }
+
+  const header = `[${startedAt}] Agent="${wh.name}" engine=${engine}${model ? ` model=${model}` : ""} job=${jobId} event=${event} driver=${sandboxDriver} sandbox=${executionPolicy.sandboxMode} net=${executionPolicy.networkPolicy} coreFiles=${coreFiles.bundleHash ? coreFiles.bundleHash.slice(0, 12) : "none"}\n$ ${path.basename(spawnBin)} ${spawnArgs.slice(0, Math.min(spawnArgs.length, 12)).join(" ")} ...\n\n`;
   logStream.write(header);
   appendRunOutput(deliveryId, header);
   broadcastRuns();
 
-  const child = spawn(bin, args, {
-    cwd: workDir,
-    env: childEnv,
+  const child = spawn(spawnBin, spawnArgs, {
+    cwd: hardenedEnv.workDir,
+    env: spawnEnv,
     detached: true,
     stdio: [stdinPayload !== null ? "pipe" : "ignore", "pipe", "pipe"],
   });
-  const activeRec = { child, deliveryId, jobId, entryId: wh.id, stoppedByUser: false, stopReason: null };
+  const activeRec = {
+    child,
+    deliveryId,
+    jobId,
+    entryId: wh.id,
+    containerName,
+    proxyHandle,
+    stoppedByUser: false,
+    stopReason: null,
+  };
   activeByJobKey.set(jobKey, activeRec);
+
+  const wallTimeout = setTimeout(() => {
+    if (activeByJobKey.get(jobKey) === activeRec) {
+      stopRunByDeliveryId(deliveryId, `Wall-clock timeout (${executionPolicy.maxExecutionSeconds}s)`);
+    }
+  }, executionPolicy.maxExecutionSeconds * 1000);
+  wallTimeout.unref?.();
 
   if (stdinPayload !== null && child.stdin) {
     child.stdin.on("error", () => {});
@@ -619,15 +863,22 @@ async function executeJobItem({ jobKey, jobId, wh, notification }) {
     const finish = (code, signal) => {
       if (done) return;
       done = true;
+      clearTimeout(wallTimeout);
+      if (proxyHandle) {
+        try { proxyHandle.revoke(); } catch {}
+      }
+      if (containerName) {
+        killDockerContainer(containerName);
+      }
+      // Ensure any stray child process group members are reaped on exit
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
       const finishedAt = new Date().toISOString();
       const status = activeRec.stoppedByUser ? "stopped" : code === 0 ? "completed" : "failed";
       const footer = `\n[${finishedAt}] ${activeRec.stoppedByUser ? activeRec.stopReason || "Stopped" : `Exited code=${code ?? "null"} signal=${signal ?? "none"}`}\n`;
       logStream.write(footer);
       logStream.end();
       appendRunOutput(deliveryId, footer);
-      if (tempMcpPath) {
-        try { fs.unlinkSync(tempMcpPath); } catch {}
-      }
+      hardenedEnv.cleanup();
       if (activeByJobKey.get(jobKey) === activeRec) activeByJobKey.delete(jobKey);
       activeCount = Math.max(0, activeCount - 1);
       upsertRunStmt.run(deliveryId, wh.id, wh.name, jobId, agentId, event, engine, status, code ?? 1, startedAt, finishedAt, logFile);
@@ -1683,6 +1934,15 @@ server.listen(UI_PORT, UI_HOST, () => {
 });
 
 const shutdown = async () => {
+  for (const [, rec] of activeByJobKey.entries()) {
+    if (rec.proxyHandle) {
+      try { rec.proxyHandle.revoke(); } catch {}
+    }
+    if (rec.containerName) killDockerContainer(rec.containerName);
+  }
+  if (dockerEgressProxy) {
+    try { await dockerEgressProxy.stop(); } catch {}
+  }
   for (const wh of webhooks) {
     await stopWebhookRelay(wh.id);
   }

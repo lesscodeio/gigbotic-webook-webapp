@@ -1,0 +1,51 @@
+# Gigbotic Isolated Job Runner Image (`gigbotic-runner:latest`)
+# Non-root, hardened container used by Gigbotic Managed Relay & Desktop Hub
+# when GIGBOTIC_SANDBOX_DRIVER=docker (or auto on Linux VPS hosts).
+FROM node:22-bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal runtime & media/coding utilities (no sudo, no ssh client, no cron, no docker-cli)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    fonts-dejavu-core \
+    git \
+    python3 \
+    python3-pil \
+    python3-venv \
+    ffmpeg \
+    jq \
+    ripgrep \
+    unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install Codex CLI and Claude Code CLI globally
+RUN npm install -g @openai/codex @anthropic-ai/claude-code \
+  && npm cache clean --force
+
+# Install Antigravity CLI (agy) into /usr/local/bin (best-effort for Linux arches)
+RUN mkdir -p /opt/agy \
+  && (curl -fsSL https://antigravity.google/cli/install.sh | HOME=/opt/agy bash || true) \
+  && if [ -x /opt/agy/.local/bin/agy ]; then ln -sf /opt/agy/.local/bin/agy /usr/local/bin/agy; fi \
+  && rm -rf /tmp/* /var/tmp/*
+
+# Strip all SUID/SGID bits from container binaries to prevent privilege escalation
+RUN find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
+
+# Reuse or create non-root UID/GID 1000 user named `runner`
+RUN if id -u 1000 >/dev/null 2>&1; then \
+      OLD_USER="$(id -nu 1000)"; \
+      OLD_GROUP="$(id -ng 1000)"; \
+      if [ "$OLD_USER" != "runner" ]; then usermod -l runner -d /home/runner -m "$OLD_USER"; fi; \
+      if [ "$OLD_GROUP" != "runner" ]; then groupmod -n runner "$OLD_GROUP"; fi; \
+    else \
+      groupadd -g 1000 runner && useradd -m -u 1000 -g 1000 -s /bin/bash runner; \
+    fi \
+  && mkdir -p /workspace /home/runner /run/gigbotic \
+  && chown -R 1000:1000 /workspace /home/runner /run/gigbotic
+
+WORKDIR /workspace
+USER 1000:1000
+ENTRYPOINT []

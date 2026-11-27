@@ -65,6 +65,7 @@ const events = new Set([
   "job.wallet_resumed",
   "job.oauth_approval_decided",
   "job.cancel_requested",
+  "job.turn_stopped",
   "job.oauth_event_received",
 ]);
 const reply = (status, body) => Response.json(body, { status });
@@ -91,6 +92,11 @@ export function createWebhookHandler(config, forward = fetch) {
     // A console verification ping must never launch the fake sample job.
     if (notification.event === "webhook.test") return reply(200, { verified: true, version: 2 });
     if (!events.has(notification.event) || typeof notification.agent?.id !== "string" || typeof notification.job?.id !== "string" || typeof notification.wakeupPrompt !== "string") return reply(400, { error: "Invalid notification" });
+    // A client-initiated turn stop halts the current run without launching a new runner turn.
+    if (notification.event === "job.turn_stopped") {
+      console.log(`[gigbotic-webhook] Turn stopped for job ${notification.job.id} (delivery ${notification.id}); skipping runner wakeup.`);
+      return reply(200, { ok: true, stopped: true, deliveryId: notification.id, jobId: notification.job.id });
+    }
     try {
       // The destination and credentials come only from trusted local config.
       // Its handler must authenticate this token and persist the idempotency key
