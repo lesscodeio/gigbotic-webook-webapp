@@ -1,0 +1,7 @@
+# Example Caddyfile (automatic HTTPS + WebSocket support)
+relay.example.com {
+    reverse_proxy 127.0.0.1:3450 {
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto https
+    }
+}

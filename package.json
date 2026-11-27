@@ -1,0 +1,17 @@
+{
+  "name": "gigbotic-webook-webapp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-Agent Gigbotic Managed Relay Linux Server & Authenticated Web Console for Codex, Claude Code, and Antigravity CLIs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "set-password": "bash scripts/set-password.sh",
+    "pm2:start": "pm2 start ecosystem.config.cjs --update-env && pm2 save",
+    "pm2:restart": "pm2 restart gigbotic-managed-relay --update-env",
+    "pm2:logs": "pm2 logs gigbotic-managed-relay --lines 60"
+  }
+}

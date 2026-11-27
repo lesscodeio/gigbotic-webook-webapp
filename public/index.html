@@ -1,0 +1,987 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gigbotic Managed Relay — Multi-Agent Console</title>
+  <style>
+    :root {
+      --canvas: #f6f5f2;
+      --surface: #ffffff;
+      --inset: #eae7e1;
+      --line: #e3e1db;
+      --ink: #141824;
+      --muted: #5b6273;
+      --accent: #5b4ce6;
+      --accent-deep: #4436d6;
+      --mint: #dff7ed;
+      --mint-ink: #116b4a;
+      --peach: #ffeadb;
+      --peach-ink: #9c4a12;
+      --danger-bg: #fde8e8;
+      --danger-ink: #b42318;
+      --sky: #e4f0ff;
+      --sky-ink: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--canvas);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    .login-wrap {
+      min-height: 100dvh; display: grid; place-items: center; padding: 20px;
+    }
+    .login-card {
+      width: 100%; max-width: 400px; background: var(--surface);
+      border: 1px solid var(--line); border-radius: 20px; padding: 28px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.05);
+    }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 24px 20px 48px; }
+    .header {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 16px; margin-bottom: 20px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: var(--ink); color: #fff; font-weight: 700; font-size: 18px;
+      display: grid; place-items: center; flex-shrink: 0;
+    }
+    h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+    .sub { font-size: 13px; color: var(--muted); }
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    }
+    .pill.ok { background: var(--mint); color: var(--mint-ink); border-color: transparent; }
+    .pill.warn { background: var(--peach); color: var(--peach-ink); border-color: transparent; }
+    .pill.err { background: var(--danger-bg); color: var(--danger-ink); border-color: transparent; }
+    .pill.info { background: var(--sky); color: var(--sky-ink); border-color: transparent; }
+    .dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+      cursor: pointer; transition: background 0.15s;
+    }
+    .btn:hover { background: var(--inset); }
+    .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .btn.primary:hover { background: #262d42; }
+    .btn.danger { color: var(--danger-ink); border-color: #f3c4c4; }
+    .btn.danger:hover { background: var(--danger-bg); }
+    .btn.sm { padding: 6px 12px; font-size: 12px; }
+    .status-strip {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 14px 18px; border-radius: 16px;
+      background: var(--surface); border: 1px solid var(--line); margin-bottom: 20px;
+    }
+    .cli-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .tabs {
+      display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px;
+      background: var(--inset); margin-bottom: 18px;
+    }
+    .tab {
+      border: 0; background: transparent; padding: 7px 16px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+    }
+    .tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+      padding: 18px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .card-title { font-size: 16px; font-weight: 600; margin: 0; }
+    .meta {
+      display: grid; grid-template-columns: auto 1fr; gap: 6px 12px;
+      font-size: 12px; background: var(--canvas); padding: 11px 13px; border-radius: 12px;
+    }
+    .meta dt { color: var(--muted); font-weight: 500; }
+    .meta dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+    .err-box {
+      font-size: 12px; padding: 8px 11px; border-radius: 10px;
+      background: var(--danger-bg); color: var(--danger-ink);
+    }
+    .empty {
+      background: var(--surface); border: 1px dashed var(--line); border-radius: 20px;
+      padding: 44px 24px; text-align: center;
+    }
+    .empty h2 { margin: 0 0 8px; font-size: 18px; }
+    .empty p { margin: 0 auto 18px; max-width: 480px; color: var(--muted); font-size: 14px; }
+    .runs-layout { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 900px) { .runs-layout { grid-template-columns: 1fr; } }
+    .run-list {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+      overflow: hidden; max-height: 68dvh; overflow-y: auto;
+    }
+    .run-item {
+      padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .run-item:last-child { border-bottom: 0; }
+    .run-item.active { background: #f2f0ff; }
+    .run-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }
+    .run-sub { font-size: 11px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .terminal-card {
+      background: #0f1320; color: #e6ebf5; border-radius: 18px;
+      overflow: hidden; border: 1px solid #222940;
+    }
+    .terminal-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 12px 16px; background: #161c2e; border-bottom: 1px solid #222940;
+      font-size: 12px; color: #b7c0d8;
+    }
+    .terminal-body {
+      margin: 0; padding: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+      min-height: 360px; max-height: 62dvh; overflow-y: auto;
+    }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(20, 24, 36, 0.45);
+      display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface); border-radius: 20px; width: 100%; max-width: 600px;
+      max-height: calc(100dvh - 32px); overflow-y: auto; border: 1px solid var(--line);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+    }
+    .modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 22px; border-bottom: 1px solid var(--line);
+    }
+    .modal-head h2 { margin: 0; font-size: 17px; }
+    .modal-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+    .modal-foot {
+      padding: 14px 22px; border-top: 1px solid var(--line);
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--muted); }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 9px 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: var(--canvas); color: var(--ink);
+      font-size: 13px; font-family: inherit;
+    }
+    .field textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-height: 76px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 560px) { .row2 { grid-template-columns: 1fr; } }
+    .paste-box {
+      background: #f4f2ff; border: 1px solid #d9d3ff; border-radius: 14px; padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .toast {
+      position: fixed; right: 20px; bottom: 20px; padding: 11px 16px;
+      border-radius: 12px; background: var(--ink); color: #fff; font-size: 13px;
+      font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+      opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 60;
+    }
+    .toast.show { opacity: 1; }
+    .cli-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .preset-btn {
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+      border-radius: 999px; padding: 5px 11px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      cursor: pointer;
+    }
+    .preset-btn:hover { background: #f2f0ff; border-color: #c8c0ff; color: var(--accent-deep); }
+    .cli-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .cli-input {
+      flex: 1; min-width: 240px; padding: 10px 14px; border-radius: 12px;
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    }
+    .stdin-bar {
+      display: flex; gap: 8px; padding: 10px 14px; background: #161c2e;
+      border-top: 1px solid #222940; flex-wrap: wrap;
+    }
+    .stdin-input {
+      flex: 1; min-width: 180px; padding: 7px 11px; border-radius: 10px;
+      border: 1px solid #2c3552; background: #0b0e18; color: #e6ebf5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    }
+    .terminal-body a { color: #7db4ff; text-decoration: underline; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- Login View -->
+  <div id="loginView" class="login-wrap hidden">
+    <div class="login-card">
+      <div class="brand" style="margin-bottom:20px">
+        <div class="logo">G</div>
+        <div>
+          <h1 style="font-size:19px">Gigbotic Managed Relay</h1>
+          <div class="sub">Sign in to manage agents &amp; relays</div>
+        </div>
+      </div>
+      <form id="loginForm" style="display:flex;flex-direction:column;gap:14px">
+        <div id="loginErr" class="err-box hidden" role="alert"></div>
+        <div class="field">
+          <label for="lUser">Username</label>
+          <input id="lUser" value="gigbotic" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="lPass">Password</label>
+          <input id="lPass" type="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="btn primary" style="width:100%;margin-top:4px">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main Console View -->
+  <div id="appView" class="shell hidden">
+    <div class="header">
+      <div class="brand">
+        <div class="logo">G</div>
+        <div>
+          <h1>Gigbotic Managed Relay</h1>
+          <div class="sub">Multi-Agent Linux Runner Console • <span id="hostLabel">loading…</span></div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="wsBadge" class="pill info"><span class="dot"></span>HTTPS Ready</span>
+        <button class="btn sm" id="refreshBtn">Refresh</button>
+        <button class="btn primary" id="addAgentBtn">+ Add Managed Relay Agent</button>
+        <button class="btn sm" id="logoutBtn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="status-strip">
+      <div class="cli-badges" id="cliBadges"></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="sub">Max parallel jobs:</span>
+        <select id="concurrencySelect" style="padding:5px 10px;border-radius:10px;border:1px solid var(--line);background:var(--canvas);font-weight:600">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="webhooks">Agents &amp; Relays (<span id="whCount">0</span>)</button>
+      <button class="tab" data-tab="runs">Live Runs &amp; Logs (<span id="runsCount">0</span>)</button>
+      <button class="tab" data-tab="cli">CLI &amp; MCP Terminal</button>
+    </div>
+
+    <section id="tab-webhooks"></section>
+
+    <section id="tab-runs" class="hidden">
+      <div class="runs-layout">
+        <div class="run-list" id="runList"></div>
+        <div class="terminal-card">
+          <div class="terminal-head">
+            <span id="termTitle">Select a run to inspect output</span>
+            <div style="display:flex;gap:8px">
+              <button class="btn sm" id="reloadLogBtn">Reload Log</button>
+              <button class="btn sm danger hidden" id="stopRunBtn">Stop Run</button>
+            </div>
+          </div>
+          <pre class="terminal-body" id="termBody">No run selected.</pre>
+        </div>
+      </div>
+    </section>
+    <section id="tab-cli" class="hidden">
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div>
+            <h3 class="card-title">Direct Server CLI &amp; MCP Setup</h3>
+            <div class="sub">Runs inside your server <code>$HOME</code> with <code>agy</code>, <code>codex</code>, <code>claude</code>, <code>node</code>, and <code>pm2</code> preloaded.</div>
+          </div>
+          <span class="pill info">Interactive PTY</span>
+        </div>
+
+        <div class="cli-presets">
+          <button type="button" class="preset-btn" data-cmd="agy mcp list">agy mcp list</button>
+          <button type="button" class="preset-btn" data-cmd="agy mcp add gigbotic https://gigbotic.com/mcp">agy mcp add gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="codex mcp list">codex mcp list</button>
+          <button type="button" class="preset-btn" data-cmd="codex mcp add gigbotic --url https://gigbotic.com/mcp">codex mcp add gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="claude mcp list">claude mcp list</button>
+          <button type="button" class="preset-btn" data-cmd="claude mcp add --transport http gigbotic https://gigbotic.com/mcp">claude mcp add gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="agy mcp remove gigbotic">agy mcp remove gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="codex mcp remove gigbotic">codex mcp remove gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="claude mcp remove gigbotic">claude mcp remove gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="codex mcp login gigbotic">codex mcp login gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="codex mcp logout gigbotic">codex mcp logout gigbotic</button>
+          <button type="button" class="preset-btn" data-cmd="codex login status && claude auth status">check logins</button>
+          <button type="button" class="preset-btn" data-cmd="pm2 status">pm2 status</button>
+        </div>
+
+        <form id="oauthCbForm" class="cli-bar" style="margin-bottom:10px">
+          <input id="oauthCbInput" class="cli-input" placeholder="Paste failed http://127.0.0.1:<port>/callback?... URL here to finish OAuth login" />
+          <button type="submit" class="btn">Complete OAuth Callback</button>
+        </form>
+
+        <form id="cliForm" class="cli-bar">
+          <input id="cliCmdInput" class="cli-input" placeholder="Enter any command, e.g. agy mcp add gigbotic https://gigbotic.com/mcp" required />
+          <button type="submit" class="btn primary">Run Command</button>
+        </form>
+      </div>
+
+      <div class="runs-layout">
+        <div class="run-list" id="cliSessionList"></div>
+        <div class="terminal-card">
+          <div class="terminal-head">
+            <span id="cliTermTitle">Run a command above or select a session</span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn sm" id="cliRefreshBtn">Refresh</button>
+              <button type="button" class="btn sm danger hidden" id="cliStopBtn">Stop</button>
+            </div>
+          </div>
+          <pre class="terminal-body" id="cliTermBody">Ready. Pick a preset or type a command above.</pre>
+          <form id="cliStdinForm" class="stdin-bar">
+            <input id="cliStdinInput" class="stdin-input" placeholder="Send stdin / paste OAuth code or answer prompts…" />
+            <button type="submit" class="btn sm primary">Send + Enter</button>
+            <button type="button" class="btn sm" id="cliCtrlCBtn">Ctrl+C</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Add / Edit Agent Modal -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2 id="modalTitle">Add Managed Relay Agent</h2>
+        <button class="btn sm" id="closeModalBtn">Close</button>
+      </div>
+      <form id="webhookForm">
+        <div class="modal-body">
+          <input type="hidden" id="fId" />
+          <div class="paste-box">
+            <label for="fPaste" style="font-size:12px;font-weight:600;color:var(--accent-deep)">
+              Quick Fill: Paste env block from Creator Studio "Managed Relay Provisioned" modal
+            </label>
+            <textarea id="fPaste" placeholder="GIGBOTIC_RELAY_URL=wss://webhook.gigbotic.com/ws/ch_...
+GIGBOTIC_RELAY_TOKEN=rly_...
+GIGBOTIC_WEBHOOK_ID=whk_...
+GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label for="fName">Agent Name</label>
+              <input id="fName" required placeholder="e.g., Cadence — Social Operator" />
+            </div>
+            <div class="field">
+              <label for="fEngine">CLI Runner Engine</label>
+              <select id="fEngine">
+                <option value="codex">Codex CLI (codex exec)</option>
+                <option value="claude">Claude Code CLI (claude -p)</option>
+                <option value="agy">Antigravity CLI (agy -p)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="fRelayUrl">Managed Relay URL (GIGBOTIC_RELAY_URL)</label>
+            <input id="fRelayUrl" required placeholder="wss://webhook.gigbotic.com/ws/ch_..." />
+          </div>
+
+          <div class="field">
+            <label for="fRelayToken">Relay Bearer Token (GIGBOTIC_RELAY_TOKEN)</label>
+            <input id="fRelayToken" type="password" autocomplete="off" placeholder="rly_..." />
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label for="fWebhookId">Webhook ID (GIGBOTIC_WEBHOOK_ID)</label>
+              <input id="fWebhookId" required placeholder="whk_..." />
+            </div>
+            <div class="field">
+              <label for="fWebhookSecret">Webhook Secret (GIGBOTIC_WEBHOOK_SECRET)</label>
+              <input id="fWebhookSecret" type="password" autocomplete="off" placeholder="whsec_..." />
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label for="fAgentId">Agent ID Scope (optional)</label>
+              <input id="fAgentId" placeholder="agt_... (leave blank for all agents)" />
+            </div>
+            <div class="field">
+              <label for="fModel">Model Override (optional)</label>
+              <input id="fModel" placeholder="e.g., gpt-5.4 or leave default" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="cancelModalBtn">Cancel</button>
+          <button type="submit" class="btn primary">Save &amp; Connect Relay</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state = {
+      webhooks: [],
+      runs: [],
+      clis: {},
+      settings: { maxConcurrency: 2 },
+      selectedRunId: null,
+      cliSessions: [],
+      selectedCliId: null,
+      cliWatchTimer: null,
+      activeTab: "webhooks",
+      viaProxy: false,
+      wsConnected: false,
+    };
+
+    const $ = (id) => document.getElementById(id);
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    }
+    let toastTimer = null;
+    function showToast(msg) {
+      const el = $("toast");
+      el.textContent = msg;
+      el.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+    }
+
+    function applyState(d) {
+      if (!d) return;
+      if (d.hostname) $("hostLabel").textContent = `${d.hostname} • Node ${d.nodeVersion || ""}`;
+      if (d.clis) state.clis = d.clis;
+      if (d.settings) {
+        state.settings = d.settings;
+        $("concurrencySelect").value = String(state.settings.maxConcurrency || 2);
+      }
+      if (Array.isArray(d.webhooks)) state.webhooks = d.webhooks;
+      if (Array.isArray(d.runs)) state.runs = d.runs;
+      renderClis();
+      renderWebhooks();
+      if (Array.isArray(d.cliSessions)) state.cliSessions = d.cliSessions;
+      renderRuns();
+      renderCliSessions();
+    }
+
+    async function loadState() {
+      const res = await fetch("/api/state", { cache: "no-store" });
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
+      const data = await res.json();
+      if (data.ok) applyState(data);
+    }
+
+    function statusPill(status) {
+      if (status === "connected" || status === "completed") return `<span class="pill ok"><span class="dot"></span>${esc(status)}</span>`;
+      if (status === "running" || status === "connecting") return `<span class="pill info"><span class="dot"></span>${esc(status)}</span>`;
+      if (status === "auth_error" || status === "error" || status === "failed") return `<span class="pill err"><span class="dot"></span>${esc(status)}</span>`;
+      return `<span class="pill warn"><span class="dot"></span>${esc(status)}</span>`;
+    }
+
+    function renderClis() {
+      $("cliBadges").innerHTML = ["codex", "claude", "agy"].map((k) => {
+        const info = state.clis[k] || {};
+        return `<span class="pill ${info.exists ? "ok" : "err"}"><span class="dot"></span>${esc(k)}${info.version ? ` (${esc(info.version)})` : ""}</span>`;
+      }).join("");
+    }
+
+    function renderWebhooks() {
+      $("whCount").textContent = String(state.webhooks.length);
+      const container = $("tab-webhooks");
+      if (!state.webhooks.length) {
+        container.innerHTML = `
+          <div class="empty">
+            <h2>No Managed Relay agents configured yet</h2>
+            <p>Provision a Managed Relay in Gigbotic Creator Studio (<b>/creator/mcp</b>), then click <b>+ Add Managed Relay Agent</b> and paste the 4 credentials. You can bind as many agents as you want and assign each one to Codex, Claude Code, or Antigravity.</p>
+            <button class="btn primary" onclick="openModal()">+ Add First Agent</button>
+          </div>`;
+        return;
+      }
+      container.innerHTML = `<div class="grid">${state.webhooks.map((w) => {
+        const rt = w.runtime || {};
+        return `
+          <div class="card">
+            <div class="card-top">
+              <div>
+                <h3 class="card-title">${esc(w.name)}</h3>
+                <div class="sub">${esc(w.engine.toUpperCase())}${w.model ? ` • ${esc(w.model)}` : ""}${w.agentId ? ` • ${esc(w.agentId)}` : ""}</div>
+              </div>
+              ${statusPill(rt.status || "disconnected")}
+            </div>
+            ${rt.lastError ? `<div class="err-box">${esc(rt.lastError)}</div>` : ""}
+            <dl class="meta">
+              <dt>Relay</dt><dd>${esc(w.relayUrl)}</dd>
+              <dt>Webhook ID</dt><dd>${esc(w.webhookId)}</dd>
+              <dt>Token</dt><dd>${esc(w.relayTokenMasked)}</dd>
+              <dt>Secret</dt><dd>${esc(w.webhookSecretMasked)}</dd>
+              <dt>Deliveries</dt><dd>${rt.deliveryCount || 0} wakeups • ${rt.testCount || 0} pings${rt.lastEvent ? ` • last: ${esc(rt.lastEvent)}` : ""}</dd>
+            </dl>
+            <div class="card-actions">
+              <button class="btn sm" onclick="editWebhook('${esc(w.id)}')">Edit</button>
+              <button class="btn sm" onclick="toggleWebhook('${esc(w.id)}', ${w.enabled ? "false" : "true"})">${w.enabled ? "Pause" : "Resume"}</button>
+              <button class="btn sm" onclick="reconnectWebhook('${esc(w.id)}')">Reconnect</button>
+              <button class="btn sm" onclick="testCli('${esc(w.id)}')">Test CLI</button>
+              <button class="btn sm danger" onclick="deleteWebhook('${esc(w.id)}', '${esc(w.name)}')">Delete</button>
+            </div>
+          </div>`;
+      }).join("")}</div>`;
+    }
+
+    function renderRuns() {
+      $("runsCount").textContent = String(state.runs.length);
+      const list = $("runList");
+      if (!state.runs.length) {
+        list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No job runs yet. Trigger a job or click <b>Test CLI</b> on an agent card.</div>`;
+        return;
+      }
+      list.innerHTML = state.runs.map((r) => `
+        <div class="run-item ${state.selectedRunId === r.deliveryId ? "active" : ""}" onclick="selectRun('${esc(r.deliveryId)}')">
+          <div class="run-row">
+            <span>${esc(r.webhookName)}</span>
+            ${statusPill(r.status)}
+          </div>
+          <div class="run-sub">${esc(r.engine)} • ${esc(r.jobId)} • ${esc(r.event)}</div>
+          <div class="run-sub">${new Date(r.startedAt).toLocaleString()}</div>
+        </div>
+      `).join("");
+
+      const activeRun = state.runs.find((r) => r.deliveryId === state.selectedRunId);
+      const stopBtn = $("stopRunBtn");
+      if (activeRun && activeRun.status === "running") {
+        stopBtn.classList.remove("hidden");
+        stopBtn.onclick = () => stopRun(activeRun.deliveryId);
+      } else {
+        stopBtn.classList.add("hidden");
+      }
+    }
+
+    window.selectRun = async function selectRun(deliveryId) {
+      state.selectedRunId = deliveryId;
+      renderRuns();
+      const run = state.runs.find((r) => r.deliveryId === deliveryId);
+      $("termTitle").textContent = run ? `${run.webhookName} (${run.engine}) — ${run.jobId} [${run.status}]` : deliveryId;
+      const res = await fetch(`/api/runs/${encodeURIComponent(deliveryId)}/output`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const body = $("termBody");
+        body.textContent = data.text || "(waiting for output…)";
+        body.scrollTop = body.scrollHeight;
+      }
+    };
+
+    async function stopRun(deliveryId) {
+      const res = await fetch(`/api/runs/${encodeURIComponent(deliveryId)}/stop`, { method: "POST" });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      showToast("Stop signal sent to running CLI process.");
+    }
+
+    function openModal(wh = null) {
+      $("fId").value = wh ? wh.id : "";
+      $("modalTitle").textContent = wh ? `Edit ${wh.name}` : "Add Managed Relay Agent";
+      $("fPaste").value = "";
+      $("fName").value = wh ? wh.name : "";
+      $("fEngine").value = wh ? wh.engine : "codex";
+      $("fRelayUrl").value = wh ? wh.relayUrl : "";
+      $("fRelayToken").value = "";
+      $("fRelayToken").placeholder = wh ? `${wh.relayTokenMasked} (leave blank to keep current)` : "rly_...";
+      $("fRelayToken").required = !wh;
+      $("fWebhookId").value = wh ? wh.webhookId : "";
+      $("fWebhookSecret").value = "";
+      $("fWebhookSecret").placeholder = wh ? `${wh.webhookSecretMasked} (leave blank to keep current)` : "whsec_...";
+      $("fWebhookSecret").required = !wh;
+      $("fAgentId").value = wh ? (wh.agentId || "") : "";
+      $("fModel").value = wh ? (wh.model || "") : "";
+      $("modalBackdrop").classList.add("open");
+    }
+    window.openModal = openModal;
+
+    function closeModal() { $("modalBackdrop").classList.remove("open"); }
+
+    $("fPaste").addEventListener("input", (e) => {
+      const txt = e.target.value;
+      const pick = (k) => {
+        const m = new RegExp(`(?:^|\\s)${k}=["']?([^\\s"']+)["']?`, "m").exec(txt);
+        return m ? m[1].trim() : "";
+      };
+      const u = pick("GIGBOTIC_RELAY_URL");
+      const t = pick("GIGBOTIC_RELAY_TOKEN");
+      const id = pick("GIGBOTIC_WEBHOOK_ID");
+      const sec = pick("GIGBOTIC_WEBHOOK_SECRET");
+      const agt = pick("GIGBOTIC_AGENT_ID");
+      if (u) $("fRelayUrl").value = u;
+      if (t) $("fRelayToken").value = t;
+      if (id) $("fWebhookId").value = id;
+      if (sec) $("fWebhookSecret").value = sec;
+      if (agt) $("fAgentId").value = agt;
+    });
+
+    $("webhookForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = $("fId").value.trim();
+      const payload = {
+        name: $("fName").value.trim(),
+        engine: $("fEngine").value,
+        relayUrl: $("fRelayUrl").value.trim(),
+        relayToken: $("fRelayToken").value.trim(),
+        webhookId: $("fWebhookId").value.trim(),
+        webhookSecret: $("fWebhookSecret").value.trim(),
+        agentId: $("fAgentId").value.trim(),
+        model: $("fModel").value.trim(),
+      };
+      const res = await fetch(id ? `/api/webhooks/${encodeURIComponent(id)}` : "/api/webhooks", {
+        method: id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(data.error || "Failed to save webhook");
+        return;
+      }
+      if (data.state) applyState(data.state);
+      closeModal();
+      showToast(id ? "Updated agent & reconnected relay" : "Added agent & connecting relay…");
+      // One-shot follow-up check after WSS handshake settles when accessed over HTTP proxy
+      if (!state.wsConnected) setTimeout(() => void loadState(), 1500);
+    });
+
+    window.editWebhook = (id) => { const wh = state.webhooks.find((w) => w.id === id); if (wh) openModal(wh); };
+    window.toggleWebhook = async (id, enabled) => {
+      const res = await fetch(`/api/webhooks/${encodeURIComponent(id)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      showToast(enabled ? "Relay resumed" : "Relay paused");
+      if (!state.wsConnected && enabled) setTimeout(() => void loadState(), 1500);
+    };
+    window.reconnectWebhook = async (id) => {
+      const res = await fetch(`/api/webhooks/${encodeURIComponent(id)}/reconnect`, { method: "POST" });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      showToast("Reconnecting relay…");
+      if (!state.wsConnected) setTimeout(() => void loadState(), 1500);
+    };
+    window.testCli = async (id) => {
+      const res = await fetch(`/api/webhooks/${encodeURIComponent(id)}/test-cli`, { method: "POST" });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      if (data.deliveryId) {
+        switchTab("runs");
+        setTimeout(() => selectRun(data.deliveryId), 250);
+        showToast("Started local CLI smoke test");
+      }
+    };
+    window.deleteWebhook = async (id, name) => {
+      if (!confirm(`Remove "${name}" from this Linux server?`)) return;
+      const res = await fetch(`/api/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      showToast(`Removed ${name}`);
+    };
+
+    function switchTab(tabName) {
+      state.activeTab = tabName;
+      document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.tab === tabName));
+      $("tab-webhooks").classList.toggle("hidden", tabName !== "webhooks");
+      $("tab-runs").classList.toggle("hidden", tabName !== "runs");
+      $("tab-cli").classList.toggle("hidden", tabName !== "cli");
+    }
+    document.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => switchTab(el.dataset.tab)));
+
+    $("addAgentBtn").addEventListener("click", () => openModal());
+    $("closeModalBtn").addEventListener("click", closeModal);
+    $("cancelModalBtn").addEventListener("click", closeModal);
+    $("modalBackdrop").addEventListener("click", (e) => { if (e.target === $("modalBackdrop")) closeModal(); });
+    $("refreshBtn").addEventListener("click", async () => {
+      await loadState();
+      if (state.selectedRunId) await selectRun(state.selectedRunId);
+      showToast("Refreshed");
+    });
+    $("reloadLogBtn").addEventListener("click", () => {
+      if (state.selectedRunId) void selectRun(state.selectedRunId);
+    });
+    $("concurrencySelect").addEventListener("change", async (e) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxConcurrency: Number(e.target.value) }),
+      });
+      const data = await res.json();
+      if (data.state) applyState(data.state);
+      showToast(`Max parallel jobs set to ${e.target.value}`);
+    });
+    $("logoutBtn").addEventListener("click", async () => {
+      await fetch("/api/auth/logout", { method: "POST" });
+      showLogin();
+    });
+
+    // Refresh when returning to the tab (e.g., right after clicking Send Test in Creator Studio)
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !$("appView").classList.contains("hidden") && !state.wsConnected) {
+        void loadState();
+      }
+    });
+
+    function showLogin() {
+      $("appView").classList.add("hidden");
+      $("loginView").classList.remove("hidden");
+      $("lPass").focus();
+    }
+
+    function showApp() {
+      $("loginView").classList.add("hidden");
+      $("appView").classList.remove("hidden");
+    }
+
+    $("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("loginErr").classList.add("hidden");
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: $("lUser").value.trim(), password: $("lPass").value }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        $("loginErr").textContent = data.error || "Sign in failed";
+        $("loginErr").classList.remove("hidden");
+        return;
+      }
+      $("lPass").value = "";
+      await bootAuthenticated();
+    });
+
+    
+    function linkifyTerminal(text) {
+      return esc(text).replace(/(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
+
+    function stopCliWatch() {
+      if (state.cliWatchTimer) {
+        clearTimeout(state.cliWatchTimer);
+        state.cliWatchTimer = null;
+      }
+    }
+
+    function scheduleCliWatch(sessionId) {
+      stopCliWatch();
+      if (state.wsConnected) return;
+      state.cliWatchTimer = setTimeout(async () => {
+        if (state.selectedCliId !== sessionId) return;
+        const s = await fetchCliSession(sessionId, true);
+        if (s && s.status === "running") scheduleCliWatch(sessionId);
+      }, 900);
+    }
+
+    function renderCliSessions() {
+      const list = $("cliSessionList");
+      if (!list) return;
+      if (!state.cliSessions.length) {
+        list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No CLI commands run yet.</div>';
+        return;
+      }
+      list.innerHTML = state.cliSessions.map((s) => `
+        <div class="run-item ${state.selectedCliId === s.id ? "active" : ""}" onclick="selectCliSession('${esc(s.id)}')">
+          <div class="run-row">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px">${esc(s.command)}</span>
+            ${statusPill(s.status)}
+          </div>
+          <div class="run-sub">${new Date(s.startedAt).toLocaleTimeString()}${s.exitCode !== null ? " • exit " + s.exitCode : ""}</div>
+        </div>
+      `).join("");
+
+      const cur = state.cliSessions.find((s) => s.id === state.selectedCliId);
+      const stopBtn = $("cliStopBtn");
+      if (cur && cur.status === "running") {
+        stopBtn.classList.remove("hidden");
+        stopBtn.onclick = () => stopCli(cur.id);
+      } else {
+        stopBtn.classList.add("hidden");
+      }
+    }
+
+    async function fetchCliSession(id, silent = false) {
+      const res = await fetch(`/api/cli/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.ok) return null;
+      const idx = state.cliSessions.findIndex((s) => s.id === id);
+      if (idx !== -1) state.cliSessions[idx] = data.session;
+      renderCliSessions();
+      $("cliTermTitle").textContent = `$ ${data.session.command} [${data.session.status}]`;
+      const body = $("cliTermBody");
+      const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
+      body.innerHTML = linkifyTerminal(data.output || "");
+      if (nearBottom || !silent) body.scrollTop = body.scrollHeight;
+      return data.session;
+    }
+
+    window.selectCliSession = async function selectCliSession(id) {
+      state.selectedCliId = id;
+      renderCliSessions();
+      const s = await fetchCliSession(id);
+      if (s && s.status === "running") scheduleCliWatch(id);
+      else stopCliWatch();
+    };
+
+    async function stopCli(id) {
+      await fetch(`/api/cli/sessions/${encodeURIComponent(id)}/stop`, { method: "POST" });
+      showToast("Sent stop signal to CLI command");
+      setTimeout(() => void fetchCliSession(id), 400);
+    }
+
+    document.querySelectorAll(".preset-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $("cliCmdInput").value = btn.dataset.cmd || "";
+        $("cliCmdInput").focus();
+      });
+    });
+
+    $("oauthCbForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const cbUrl = $("oauthCbInput").value.trim();
+      if (!cbUrl) return;
+      const res = await fetch("/api/cli/oauth-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: cbUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(data.error || ("Callback failed (HTTP " + (data.status || res.status) + ")"));
+        return;
+      }
+      $("oauthCbInput").value = "";
+      showToast("OAuth callback delivered (HTTP " + data.status + ")!");
+      if (state.selectedCliId) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 400);
+    });
+
+    $("cliForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const command = $("cliCmdInput").value.trim();
+      if (!command) return;
+      const res = await fetch("/api/cli/exec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(data.error || "Failed to start CLI command");
+        return;
+      }
+      if (Array.isArray(data.sessions)) state.cliSessions = data.sessions;
+      state.selectedCliId = data.session.id;
+      renderCliSessions();
+      $("cliTermTitle").textContent = `$ ${data.session.command} [running]`;
+      $("cliTermBody").innerHTML = linkifyTerminal(data.output || "");
+      scheduleCliWatch(data.session.id);
+    });
+
+    $("cliStdinForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!state.selectedCliId) return;
+      const val = $("cliStdinInput").value;
+      const res = await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: val, appendNewline: true }),
+      });
+      if (res.ok) {
+        $("cliStdinInput").value = "";
+        setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "Unable to send input");
+      }
+    });
+
+    $("cliCtrlCBtn").addEventListener("click", async () => {
+      if (!state.selectedCliId) return;
+      await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: "\x03", appendNewline: false }),
+      });
+      setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
+    });
+
+    $("cliRefreshBtn").addEventListener("click", () => {
+      if (state.selectedCliId) void fetchCliSession(state.selectedCliId);
+    });
+
+    function tryConnectWs() {
+      if (state.viaProxy) {
+        $("wsBadge").className = "pill ok";
+        $("wsBadge").innerHTML = '<span class="dot"></span>HTTPS Secured';
+        return;
+      }
+      let wsRetry = 0;
+      const open = () => {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${location.host}/ws`);
+        ws.onopen = () => {
+          wsRetry = 0;
+          state.wsConnected = true;
+          $("wsBadge").className = "pill ok";
+          $("wsBadge").innerHTML = '<span class="dot"></span>Live WS Connected';
+        };
+        ws.onmessage = (ev) => {
+          let msg;
+          try { msg = JSON.parse(ev.data); } catch { return; }
+          if (msg.type === "snapshot") applyState(msg.payload);
+          else if (msg.type === "webhooks") { state.webhooks = msg.payload || []; renderWebhooks(); }
+          else if (msg.type === "runs") { state.runs = msg.payload?.runs || []; renderRuns(); }
+          else if (msg.type === "cli-sessions") { state.cliSessions = msg.payload || []; renderCliSessions(); }
+          else if (msg.type === "cli-output" && msg.payload?.id === state.selectedCliId) {
+            const body = $("cliTermBody");
+            const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
+            body.innerHTML += linkifyTerminal(msg.payload.text || "");
+            if (nearBottom) body.scrollTop = body.scrollHeight;
+          }
+          else if (msg.type === "settings") { state.settings = msg.payload; $("concurrencySelect").value = String(state.settings.maxConcurrency || 2); }
+          else if (msg.type === "run-output" && msg.payload?.deliveryId === state.selectedRunId) {
+            const body = $("termBody");
+            const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+            body.textContent += msg.payload.text;
+            if (nearBottom) body.scrollTop = body.scrollHeight;
+          }
+        };
+        ws.onclose = () => {
+          state.wsConnected = false;
+          $("wsBadge").className = "pill warn";
+          $("wsBadge").innerHTML = '<span class="dot"></span>Reconnecting…';
+          setTimeout(open, Math.min(15000, 1000 * (2 ** Math.min(wsRetry++, 5))));
+        };
+      };
+      open();
+    }
+
+    async function bootAuthenticated() {
+      showApp();
+      await loadState();
+      tryConnectWs();
+    }
+
+    (async () => {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const me = await res.json();
+      state.viaProxy = Boolean(me.viaProxy);
+      if (me.authenticated) {
+        await bootAuthenticated();
+      } else {
+        showLogin();
+      }
+    })();
+  </script>
+</body>
+</html>
