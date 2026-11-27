@@ -1005,7 +1005,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         authenticated: authed,
         username: authed ? authConfig?.username : null,
-        viaProxy: proxied,
+        viaProxy: req.headers["x-via-public-proxy"] === "1",
       });
       return;
     }
