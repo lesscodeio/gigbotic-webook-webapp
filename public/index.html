@@ -266,9 +266,14 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px;
     }
     .xterm-wrap {
-      background: #0f1320; padding: 10px 12px; height: 460px; overflow: hidden;
+      background: #0f1320; padding: 12px 14px; height: 560px; overflow: hidden;
     }
     .xterm-wrap .xterm { height: 100%; }
+    .snippet-select {
+      padding: 6px 10px; border-radius: 999px; border: 1px solid #2e3754;
+      background: #1b2236; color: #dbe3f7; font-size: 12px; font-weight: 500;
+      cursor: pointer; max-width: 240px;
+    }
     .terminal-body a { color: #7db4ff; text-decoration: underline; }
     .hidden { display: none !important; }
   </style>
@@ -333,7 +338,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="webhooks">Agents &amp; Relays (<span id="whCount">0</span>)</button>
       <button class="tab" data-tab="runs">Live Runs &amp; Logs (<span id="runsCount">0</span>)</button>
-      <button class="tab" data-tab="cli">CLI &amp; MCP Terminal</button>
+      <button class="tab" data-tab="cli">Terminal</button>
     </div>
 
     <section id="tab-webhooks"></section>
@@ -354,71 +359,53 @@
       </div>
     </section>
     <section id="tab-cli" class="hidden">
-      <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-          <div>
-            <h3 class="card-title">CLI Account, MCP &amp; Terminal</h3>
-            <div class="sub">One-click login, logout, and Gigbotic MCP management for each CLI inside an interactive PTY.</div>
+      <div class="terminal-card">
+        <div class="terminal-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span id="cliTermTitle" style="font-weight:600;color:#e6ebf5">Interactive Linux Shell</span>
+            <span id="shellStatusPill" class="pill info" style="padding:3px 9px;font-size:11px"><span class="dot"></span>Connecting…</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <div class="cli-tool-tabs" id="cliToolTabs">
-              <button type="button" class="cli-tool-tab active" data-tool="agy">Antigravity (agy) <span id="authDot-agy" class="dot" style="color:var(--muted)"></span></button>
-              <button type="button" class="cli-tool-tab" data-tool="codex">Codex <span id="authDot-codex" class="dot" style="color:var(--muted)"></span></button>
-              <button type="button" class="cli-tool-tab" data-tool="claude">Claude Code <span id="authDot-claude" class="dot" style="color:var(--muted)"></span></button>
-              <button type="button" class="cli-tool-tab" data-tool="system">Server &amp; GPU</button>
-            </div>
-            <button type="button" class="btn sm" id="checkAuthBtn">Check Auth Status</button>
+            <select id="snippetSelect" class="snippet-select" title="Optional quick command snippets">
+              <option value="">Insert snippet…</option>
+              <option value="agy">agy (Login / TUI)</option>
+              <option value="agy mcp list">agy mcp list</option>
+              <option value="agy mcp add gigbotic https://gigbotic.com/mcp">agy mcp add gigbotic</option>
+              <option value="agy mcp remove gigbotic">agy mcp remove gigbotic</option>
+              <option value="codex login --device-auth">codex login --device-auth</option>
+              <option value="codex login status">codex login status</option>
+              <option value="codex logout">codex logout</option>
+              <option value="codex mcp list">codex mcp list</option>
+              <option value="codex mcp add gigbotic --url https://gigbotic.com/mcp">codex mcp add gigbotic</option>
+              <option value="codex mcp login gigbotic">codex mcp login gigbotic</option>
+              <option value="codex mcp remove gigbotic">codex mcp remove gigbotic</option>
+              <option value="claude auth login">claude auth login</option>
+              <option value="claude auth status">claude auth status</option>
+              <option value="claude auth logout">claude auth logout</option>
+              <option value="claude mcp list">claude mcp list</option>
+              <option value="claude mcp add --transport http gigbotic https://gigbotic.com/mcp">claude mcp add gigbotic</option>
+              <option value="claude mcp remove gigbotic">claude mcp remove gigbotic</option>
+              <option value="pm2 status">pm2 status</option>
+              <option value="nvidia-smi">nvidia-smi</option>
+            </select>
+            <button type="button" class="btn sm" id="toggleOauthHelperBtn">OAuth Callback</button>
+            <button type="button" class="btn sm" id="clearTermBtn">Clear</button>
+            <button type="button" class="btn sm" id="restartShellBtn">Restart Shell</button>
           </div>
         </div>
-
-        <div id="cliToolPanel"></div>
-
-        <form id="cliForm" class="cli-bar">
-          <input id="cliCmdInput" class="cli-input" placeholder="Or type any custom command, e.g. agy mcp add --header &quot;Authorization: Bearer ...&quot; myserver https://..." required />
-          <button type="submit" class="btn primary">Run Command</button>
-        </form>
+        <div id="cliXterm" class="xterm-wrap"></div>
+        <div id="cliDetectedUrls" class="detected-urls hidden"></div>
       </div>
 
-      <div class="runs-layout">
-        <div class="run-list" id="cliSessionList"></div>
-        <div>
-          <div class="terminal-card">
-            <div class="terminal-head">
-              <span id="cliTermTitle">Click inside terminal to type directly • Select an action above or open Bash</span>
-              <div style="display:flex;gap:8px">
-                <button type="button" class="btn sm" id="openBashBtn">Open Bash Shell</button>
-                <button type="button" class="btn sm" id="cliRefreshBtn">Reload</button>
-                <button type="button" class="btn sm danger hidden" id="cliStopBtn">Stop</button>
-              </div>
-            </div>
-            <div id="cliXterm" class="xterm-wrap"></div>
-            <div id="cliDetectedUrls" class="detected-urls hidden"></div>
-            <form id="cliStdinForm" class="stdin-bar">
-              <input id="cliStdinInput" class="stdin-input" placeholder="Paste OAuth code, type /logout, or answer interactive prompts…" />
-              <button type="submit" class="btn sm primary">Send + Enter</button>
-            </form>
-            <div class="key-bar">
-              <span style="font-size:11px;color:#8e98b3;margin-right:4px">PTY Keys:</span>
-              <button type="button" class="key-btn" data-key="enter">Enter</button>
-              <button type="button" class="key-btn" data-key="up">↑ Up</button>
-              <button type="button" class="key-btn" data-key="down">↓ Down</button>
-              <button type="button" class="key-btn" data-key="logout">/logout</button>
-              <button type="button" class="key-btn" data-key="exit">/exit</button>
-              <button type="button" class="key-btn" data-key="ctrld">Ctrl+D</button>
-              <button type="button" class="key-btn" data-key="ctrlc">Ctrl+C</button>
-            </div>
-          </div>
-
-          <div class="oauth-helper" id="oauthHelperBox">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:12px;font-weight:600;color:var(--ink)">Loopback OAuth Helper <span class="sub">(only needed if login redirects your browser to a failed <code>http://127.0.0.1:...</code> URL)</span></span>
-            </div>
-            <form id="oauthCbForm" class="cli-bar">
-              <input id="oauthCbInput" class="cli-input" placeholder="Paste failed http://127.0.0.1:<port>/callback?... URL here" />
-              <button type="submit" class="btn sm primary">Complete OAuth Callback</button>
-            </form>
-          </div>
+      <div class="oauth-helper hidden" id="oauthHelperBox">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:600;color:var(--ink)">Loopback OAuth Callback <span class="sub">(paste a failed <code>http://127.0.0.1:&lt;port&gt;/callback?...</code> URL here)</span></span>
+          <button type="button" class="btn sm" id="hideOauthHelperBtn">Hide</button>
         </div>
+        <form id="oauthCbForm" class="cli-bar">
+          <input id="oauthCbInput" class="cli-input" placeholder="http://127.0.0.1:<port>/callback?code=...&state=..." />
+          <button type="submit" class="btn sm primary">Complete OAuth Callback</button>
+        </form>
       </div>
     </section>
   </div>
@@ -779,8 +766,10 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       $("tab-cli").classList.toggle("hidden", tabName !== "cli");
       if (tabName === "cli") {
         ensureXterm();
-        setTimeout(() => fitXtermAndNotify(), 50);
-        if (!state.cliAuthStatus) void refreshCliAuthStatus(true);
+        setTimeout(() => {
+          fitXtermAndNotify();
+          void openInteractiveShell(false);
+        }, 40);
       }
     }
     document.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => switchTab(el.dataset.tab)));
@@ -870,30 +859,8 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
     }
 
     function renderCliSessions() {
-      const list = $("cliSessionList");
-      if (!list) return;
-      if (!state.cliSessions.length) {
-        list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No CLI commands run yet.</div>';
-        return;
-      }
-      list.innerHTML = state.cliSessions.map((s) => `
-        <div class="run-item ${state.selectedCliId === s.id ? "active" : ""}" onclick="selectCliSession('${esc(s.id)}')">
-          <div class="run-row">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px">${esc(s.command)}</span>
-            ${statusPill(s.status)}
-          </div>
-          <div class="run-sub">${new Date(s.startedAt).toLocaleTimeString()}${s.exitCode !== null ? " • exit " + s.exitCode : ""}</div>
-        </div>
-      `).join("");
-
       const cur = state.cliSessions.find((s) => s.id === state.selectedCliId);
-      const stopBtn = $("cliStopBtn");
-      if (cur && cur.status === "running") {
-        stopBtn.classList.remove("hidden");
-        stopBtn.onclick = () => stopCli(cur.id);
-      } else {
-        stopBtn.classList.add("hidden");
-      }
+      if (cur) updateShellStatus(cur.status);
     }
 
     function renderDetectedUrls(urls) {
@@ -957,8 +924,6 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       if (fit) term.loadAddon(fit);
       term.open(mount);
       if (fit) fit.fit();
-      term.writeln("\x1b[90mReady. Select an action above (Antigravity, Codex, Claude Code) or click Open Bash Shell.\x1b[0m");
-      term.writeln("\x1b[90mClick anywhere inside this terminal to type directly (arrows, Enter, Ctrl+C, Cmd/Ctrl+V paste).\x1b[0m");
 
       term.onData((data) => {
         if (!state.selectedCliId) return;
@@ -968,6 +933,8 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
           void sendCliRawInput(data, false);
         }
       });
+
+      mount.addEventListener("click", () => term.focus());
 
       window.addEventListener("resize", () => {
         if (state.activeTab === "cli") fitXtermAndNotify();
@@ -1039,236 +1006,94 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       setTimeout(() => void fetchCliSession(id), 400);
     }
 
-    const CLI_CATALOG = {
-      agy: {
-        authNote: "Interactive SSH OAuth: click Login, open the printed Google URL, paste the code into the terminal input bar below, then press /exit or Ctrl+D.",
-        groups: [
-          {
-            title: "Account & Authentication",
-            actions: [
-              { label: "Login / Open agy", cmd: "agy", kind: "primary" },
-              { label: "Check Models (Verify Auth)", cmd: "agy models" },
-              { label: "Logout (Open agy → /logout)", cmd: "agy", hint: "Once agy opens, click the /logout PTY key button below.", kind: "danger" },
-            ],
-          },
-          {
-            title: "Gigbotic MCP",
-            actions: [
-              { label: "List MCP Servers", cmd: "agy mcp list" },
-              { label: "Add Gigbotic MCP", cmd: "agy mcp add gigbotic https://gigbotic.com/mcp", kind: "primary" },
-              { label: "Remove Gigbotic MCP", cmd: "agy mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Antigravity?" },
-            ],
-          },
-        ],
-      },
-      codex: {
-        authNote: "Device-code login works cleanly without any localhost redirect — open the URL and enter the 8-character code shown in the terminal.",
-        groups: [
-          {
-            title: "Account & Authentication",
-            actions: [
-              { label: "Login (Device Auth)", cmd: "codex login --device-auth", kind: "primary" },
-              { label: "Check Login Status", cmd: "codex login status" },
-              { label: "Logout Codex", cmd: "codex logout", kind: "danger", confirm: "Log out of Codex CLI on this server?" },
-            ],
-          },
-          {
-            title: "Gigbotic MCP",
-            actions: [
-              { label: "List MCP", cmd: "codex mcp list" },
-              { label: "Add Gigbotic MCP", cmd: "codex mcp add gigbotic --url https://gigbotic.com/mcp", kind: "primary" },
-              { label: "Login Gigbotic MCP", cmd: "codex mcp login gigbotic" },
-              { label: "Logout Gigbotic MCP", cmd: "codex mcp logout gigbotic", confirm: "Log out of Gigbotic MCP in Codex?" },
-              { label: "Remove Gigbotic MCP", cmd: "codex mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Codex?" },
-            ],
-          },
-        ],
-      },
-      claude: {
-        authNote: "Click Login, open the printed Anthropic URL in your browser, copy the authorization code, and paste it into the input bar below.",
-        groups: [
-          {
-            title: "Account & Authentication",
-            actions: [
-              { label: "Login (Claude.ai)", cmd: "claude auth login", kind: "primary" },
-              { label: "Login (API Console)", cmd: "claude auth login --console" },
-              { label: "Check Auth Status", cmd: "claude auth status" },
-              { label: "Logout Claude", cmd: "claude auth logout", kind: "danger", confirm: "Log out of Claude Code CLI on this server?" },
-            ],
-          },
-          {
-            title: "Gigbotic MCP",
-            actions: [
-              { label: "List MCP", cmd: "claude mcp list" },
-              { label: "Add Gigbotic MCP", cmd: "claude mcp add --transport http gigbotic https://gigbotic.com/mcp", kind: "primary" },
-              { label: "Remove Gigbotic MCP", cmd: "claude mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Claude Code?" },
-            ],
-          },
-        ],
-      },
-      system: {
-        authNote: "Quick diagnostics for PM2, relay logs, GPU utilization, memory, and disk.",
-        groups: [
-          {
-            title: "Relay Service",
-            actions: [
-              { label: "PM2 Status", cmd: "pm2 status", kind: "primary" },
-              { label: "Relay Logs (40 lines)", cmd: "pm2 logs gigbotic-managed-relay --nostream --lines 40" },
-              { label: "Check All CLI Versions", cmd: "node -v && codex --version && claude --version && agy --version" },
-            ],
-          },
-          {
-            title: "Hardware & Storage",
-            actions: [
-              { label: "GPU Status (nvidia-smi)", cmd: "nvidia-smi" },
-              { label: "RAM & Disk Usage", cmd: "free -h && echo && df -h /" },
-              { label: "List Isolated Job Dirs", cmd: "ls -la ~/.gigbotic/isolated-jobs" },
-            ],
-          },
-        ],
-      },
-    };
-
-    function updateAuthDots() {
-      const st = state.cliAuthStatus;
-      for (const k of ["agy", "codex", "claude"]) {
-        const dot = $(`authDot-${k}`);
-        if (!dot) continue;
-        if (!st || !st[k]) {
-          dot.style.color = "var(--muted)";
-          dot.title = "Click Check Auth Status";
-        } else if (st[k].authenticated) {
-          dot.style.color = "var(--mint-ink)";
-          dot.title = st[k].summary || "Authenticated";
-        } else {
-          dot.style.color = "var(--peach-ink)";
-          dot.title = st[k].summary || "Not logged in";
-        }
-      }
-    }
-
-    function renderCliToolPanel() {
-      const tool = state.activeCliTool || "agy";
-      document.querySelectorAll(".cli-tool-tab").forEach((el) => {
-        el.classList.toggle("active", el.dataset.tool === tool);
-      });
-      const spec = CLI_CATALOG[tool] || CLI_CATALOG.agy;
-      const authInfo = state.cliAuthStatus?.[tool];
-      const authBadge = authInfo
-        ? `<span class="pill ${authInfo.authenticated ? "ok" : "warn"}"><span class="dot"></span>${esc(authInfo.summary)}</span>`
-        : "";
-
-      $("cliToolPanel").innerHTML = `
-        <div class="cli-groups">
-          ${spec.groups.map((g, gi) => `
-            <div class="cli-group">
-              <div class="cli-group-title">
-                <span>${esc(g.title)}</span>
-                ${gi === 0 ? authBadge : ""}
-              </div>
-              <div class="cli-action-row">
-                ${g.actions.map((a, ai) => `
-                  <button type="button" class="act-btn ${a.kind || ""}" data-gi="${gi}" data-ai="${ai}" title="${esc(a.cmd)}">
-                    ${esc(a.label)}
-                  </button>
-                `).join("")}
-              </div>
-            </div>
-          `).join("")}
-        </div>
-        <p class="cli-hint" style="margin-bottom:10px">${esc(spec.authNote)}</p>
-      `;
-
-      $("cliToolPanel").querySelectorAll(".act-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const action = spec.groups[Number(btn.dataset.gi)].actions[Number(btn.dataset.ai)];
-          if (action.confirm && !confirm(action.confirm)) return;
-          $("cliCmdInput").value = action.cmd;
-          if (action.hint) showToast(action.hint);
-          void executeCliCommand(action.cmd);
-        });
-      });
-      updateAuthDots();
-    }
-
-    async function refreshCliAuthStatus(silent = false) {
-      const btn = $("checkAuthBtn");
-      if (btn) btn.textContent = "Checking…";
-      try {
-        const res = await fetch("/api/cli/auth-status", { cache: "no-store" });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ok) {
-            state.cliAuthStatus = data.authStatus;
-            renderCliToolPanel();
-            if (!silent) showToast("CLI auth status updated");
-          }
-        }
-      } finally {
-        if (btn) btn.textContent = "Check Auth Status";
-      }
-    }
-
     function checkOAuthHelperHighlight(text) {
       const box = $("oauthHelperBox");
       if (!box) return;
       const needsCb = /127\.0\.0\.1:\d+|localhost:\d+|redirect_uri=http%3A%2F%2F127\.0\.0\.1/i.test(String(text || ""));
-      box.classList.toggle("highlight", needsCb);
+      if (needsCb) {
+        box.classList.remove("hidden");
+        box.classList.add("highlight");
+      }
     }
 
-    async function executeCliCommand(command) {
-      const cmd = String(command || "").trim();
-      if (!cmd) return;
+    function updateShellStatus(status) {
+      const pill = $("shellStatusPill");
+      if (!pill) return;
+      if (status === "running") {
+        pill.className = "pill ok";
+        pill.innerHTML = '<span class="dot"></span>Shell Ready';
+      } else if (status === "connecting") {
+        pill.className = "pill info";
+        pill.innerHTML = '<span class="dot"></span>Starting…';
+      } else {
+        pill.className = "pill warn";
+        pill.innerHTML = `<span class="dot"></span>${esc(status || "Exited")}`;
+      }
+    }
+
+    async function openInteractiveShell(restart = false) {
       const term = ensureXterm();
       if (state.fitAddon) { try { state.fitAddon.fit(); } catch {} }
       const cols = term?.cols || 120;
       const rows = term?.rows || 34;
-      const res = await fetch("/api/cli/exec", {
+      updateShellStatus("connecting");
+      const res = await fetch("/api/cli/shell", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: cmd, cols, rows }),
+        body: JSON.stringify({ restart, cols, rows }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        showToast(data.error || "Failed to start CLI command");
+        updateShellStatus("error");
+        showToast(data.error || "Failed to start interactive shell");
         return;
       }
-      if (Array.isArray(data.sessions)) state.cliSessions = data.sessions;
       state.selectedCliId = data.session.id;
-      renderCliSessions();
-      $("cliTermTitle").textContent = `$ ${data.session.command} [running]`;
-      writeXtermFull(data.rawOutput || data.output || "");
+      updateShellStatus(data.session.status);
+      writeXtermFull(data.rawOutput || "");
       renderDetectedUrls(data.detectedUrls || []);
-      checkOAuthHelperHighlight(data.output || "");
+      checkOAuthHelperHighlight((data.output || "") + "\n" + (data.detectedUrls || []).join("\n"));
+      if (term) term.focus();
       scheduleCliWatch(data.session.id);
     }
 
     async function sendCliRawInput(data, appendNewline = false) {
-      if (!state.selectedCliId) {
-        showToast("Start or select a running CLI session first");
-        return false;
-      }
+      if (!state.selectedCliId) return false;
       const res = await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data, appendNewline }),
       });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        showToast(d.error || "CLI session is not accepting input");
-        return false;
-      }
-      if (!state.wsConnected) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
+      if (!res.ok) return false;
+      if (!state.wsConnected) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 250);
       return true;
     }
 
-    document.querySelectorAll(".cli-tool-tab").forEach((el) => {
-      el.addEventListener("click", () => {
-        state.activeCliTool = el.dataset.tool || "agy";
-        renderCliToolPanel();
-      });
+    $("snippetSelect").addEventListener("change", (e) => {
+      const cmd = e.target.value;
+      e.target.value = "";
+      if (!cmd || !state.selectedCliId) return;
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: "cli-input", id: state.selectedCliId, data: cmd }));
+      } else {
+        void sendCliRawInput(cmd, false);
+      }
+      if (state.xterm) state.xterm.focus();
     });
-    $("checkAuthBtn").addEventListener("click", () => void refreshCliAuthStatus(false));
+
+    $("toggleOauthHelperBtn").addEventListener("click", () => {
+      $("oauthHelperBox").classList.toggle("hidden");
+    });
+    $("hideOauthHelperBtn").addEventListener("click", () => {
+      $("oauthHelperBox").classList.add("hidden");
+    });
+    $("clearTermBtn").addEventListener("click", () => {
+      if (state.xterm) {
+        state.xterm.clear();
+        state.xterm.focus();
+      }
+    });
+    $("restartShellBtn").addEventListener("click", () => void openInteractiveShell(true));
 
     $("oauthCbForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1287,44 +1112,8 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       $("oauthCbInput").value = "";
       $("oauthHelperBox").classList.remove("highlight");
       showToast("OAuth callback delivered (HTTP " + data.status + ")!");
-      if (state.selectedCliId) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 400);
-      setTimeout(() => void refreshCliAuthStatus(true), 1200);
+      if (state.xterm) state.xterm.focus();
     });
-
-    $("cliForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      await executeCliCommand($("cliCmdInput").value);
-    });
-
-    $("cliStdinForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const val = $("cliStdinInput").value;
-      const ok = await sendCliRawInput(val, true);
-      if (ok) $("cliStdinInput").value = "";
-    });
-
-    const PTY_KEYS = {
-      enter: "\r",
-      up: "\x1b[A",
-      down: "\x1b[B",
-      logout: "/logout\r",
-      exit: "/exit\r",
-      ctrld: "\x04",
-      ctrlc: "\x03",
-    };
-    document.querySelectorAll(".key-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const seq = PTY_KEYS[btn.dataset.key];
-        if (seq !== undefined) void sendCliRawInput(seq, false);
-      });
-    });
-
-    $("openBashBtn").addEventListener("click", () => void executeCliCommand("bash -i"));
-
-    $("cliRefreshBtn").addEventListener("click", () => {
-      if (state.selectedCliId) void fetchCliSession(state.selectedCliId, false);
-    });
-    renderCliToolPanel();
 
     function tryConnectWs() {
       if (state.viaProxy) {

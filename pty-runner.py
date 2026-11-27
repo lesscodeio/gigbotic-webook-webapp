@@ -15,7 +15,10 @@ else:
 
 pid, master_fd = pty.fork()
 if pid == 0:
-    os.execvp("/bin/bash", ["/bin/bash", "-c", cmd])
+    if cmd == "__shell__":
+        os.execvp("/bin/bash", ["/bin/bash", "-i"])
+    else:
+        os.execvp("/bin/bash", ["/bin/bash", "-c", cmd])
 
 def set_winsize(r, c):
     try:

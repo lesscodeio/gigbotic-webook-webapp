@@ -770,7 +770,7 @@ function startWebhookRelay(wh) {
 const cliSessions = new Map(); // id -> { id, command, cwd, status, exitCode, startedAt, finishedAt, output, child, idleTimer }
 const MAX_CLI_SESSIONS = 25;
 const MAX_CLI_OUTPUT_CHARS = 160_000;
-const CLI_IDLE_TIMEOUT_MS = 10 * 60_000;
+const CLI_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 function stripAnsiForWeb(text) {
   return String(text || "")
@@ -1004,10 +1004,12 @@ function startCliSession(command, requestedCwd, cols = 120, rows = 34) {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
-  const banner = `\x1b[90m$ ${cmd}\x1b[0m\r\n`;
+  const isInteractiveShell = cmd === "__shell__";
+  const banner = isInteractiveShell ? "" : `\x1b[90m$ ${cmd}\x1b[0m\r\n`;
   const rec = {
     id,
-    command: cmd,
+    command: isInteractiveShell ? "bash" : cmd,
+    isShell: isInteractiveShell,
     cwd: workDir,
     status: "running",
     exitCode: null,
@@ -1468,6 +1470,40 @@ const server = http.createServer(async (req, res) => {
       const r = await fetch(target.toString(), { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8000) });
       const text = (await r.text()).slice(0, 400);
       sendJson(res, 200, { ok: r.ok || (r.status >= 300 && r.status < 400), status: r.status, bodyPreview: text });
+      return;
+    }
+
+    if (req.method === "POST" && p === "/api/cli/shell") {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { ok: false, error: "Cross-origin shell request blocked." });
+        return;
+      }
+      const body = await readJsonBody(req);
+      let rec = null;
+      if (!body.restart) {
+        for (const s of cliSessions.values()) {
+          if (s.isShell && s.status === "running") {
+            rec = s;
+            break;
+          }
+        }
+      } else {
+        for (const s of cliSessions.values()) {
+          if (s.isShell && s.status === "running") stopCliSession(s.id);
+        }
+      }
+      if (!rec) {
+        rec = startCliSession("__shell__", body.cwd, body.cols, body.rows);
+      } else if (body.cols && body.rows) {
+        resizeCliSession(rec.id, body.cols, body.rows);
+      }
+      sendJson(res, 200, {
+        ok: true,
+        session: summarizeCliSession(rec),
+        output: rec.output,
+        rawOutput: rec.rawOutput,
+        detectedUrls: rec.detectedUrls || [],
+      });
       return;
     }
 
