@@ -962,7 +962,7 @@ function isSameOrigin(req) {
   }
 }
 
-function startCliSession(command, requestedCwd) {
+function startCliSession(command, requestedCwd, cols = 120, rows = 34) {
   const activeCli = [...cliSessions.values()].filter((s) => s.status === "running");
   if (activeCli.length >= 2) {
     throw new Error("Maximum 2 concurrent CLI sessions running. Stop one first.");
@@ -971,6 +971,8 @@ function startCliSession(command, requestedCwd) {
   if (!cmd || cmd.length > 4000) {
     throw new Error("Command must be between 1 and 4000 characters.");
   }
+  const safeCols = Math.max(40, Math.min(300, Number(cols) || 120));
+  const safeRows = Math.max(12, Math.min(120, Number(rows) || 34));
   const workDir = requestedCwd && fs.existsSync(requestedCwd) ? requestedCwd : HOME_DIR;
   const id = `cli_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const startedAt = new Date().toISOString();
@@ -988,19 +990,21 @@ function startCliSession(command, requestedCwd) {
     SSH_TTY: "/dev/pts/0",
     NO_BROWSER: "1",
     TERM: "xterm-256color",
-    COLUMNS: "120",
-    LINES: "34",
+    COLORTERM: "truecolor",
+    COLUMNS: String(safeCols),
+    LINES: String(safeRows),
     PATH: `${BIN_DIR}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
   };
 
   const ptyScript = path.join(__dirname, "pty-runner.py");
-  const child = spawn("/usr/bin/python3", ["-u", ptyScript, cmd], {
+  const child = spawn("/usr/bin/python3", ["-u", ptyScript, String(safeCols), String(safeRows), cmd], {
     cwd: workDir,
     env: childEnv,
     detached: true,
     stdio: ["pipe", "pipe", "pipe"],
   });
 
+  const banner = `\x1b[90m$ ${cmd}\x1b[0m\r\n`;
   const rec = {
     id,
     command: cmd,
@@ -1009,8 +1013,8 @@ function startCliSession(command, requestedCwd) {
     exitCode: null,
     startedAt,
     finishedAt: null,
-    rawOutput: `$ ${cmd}\n`,
-    output: `$ ${cmd}\n`,
+    rawOutput: banner,
+    output: stripAnsiForWeb(banner),
     detectedUrls: [],
     child,
     idleTimer: null,
@@ -1020,8 +1024,10 @@ function startCliSession(command, requestedCwd) {
     if (rec.idleTimer) clearTimeout(rec.idleTimer);
     rec.idleTimer = setTimeout(() => {
       if (rec.status === "running") {
-        rec.rawOutput += "\n[Stopped: 10-minute idle timeout]\n";
+        const msg = "\r\n\x1b[33m[Stopped: 10-minute idle timeout]\x1b[0m\r\n";
+        rec.rawOutput += msg;
         rec.output = stripAnsiForWeb(rec.rawOutput);
+        broadcast("cli-chunk", { id: rec.id, raw: msg, detectedUrls: rec.detectedUrls });
         stopCliSession(rec.id);
       }
     }, CLI_IDLE_TIMEOUT_MS);
@@ -1031,7 +1037,8 @@ function startCliSession(command, requestedCwd) {
 
   const pushChunk = (raw) => {
     resetIdle();
-    rec.rawOutput += raw.toString("utf8");
+    const chunkStr = raw.toString("utf8");
+    rec.rawOutput += chunkStr;
     if (rec.rawOutput.length > MAX_CLI_OUTPUT_CHARS * 2) {
       rec.rawOutput = rec.rawOutput.slice(-(MAX_CLI_OUTPUT_CHARS * 2));
     }
@@ -1040,7 +1047,7 @@ function startCliSession(command, requestedCwd) {
       rec.output = rec.output.slice(-MAX_CLI_OUTPUT_CHARS);
     }
     rec.detectedUrls = extractDetectedUrls(rec.rawOutput);
-    broadcast("cli-output", { id: rec.id, fullOutput: rec.output, detectedUrls: rec.detectedUrls });
+    broadcast("cli-chunk", { id: rec.id, raw: chunkStr, detectedUrls: rec.detectedUrls });
   };
 
   child.stdout?.on("data", pushChunk);
@@ -1053,16 +1060,19 @@ function startCliSession(command, requestedCwd) {
     rec.finishedAt = new Date().toISOString();
     rec.exitCode = code ?? (signal ? 130 : 1);
     rec.status = rec.stoppedByUser ? "stopped" : code === 0 ? "completed" : "failed";
-    const footer = `\n[Exited code=${rec.exitCode}]\n`;
+    const color = rec.exitCode === 0 ? "32" : rec.stoppedByUser ? "33" : "31";
+    const footer = `\r\n\x1b[${color}m[Exited code=${rec.exitCode}]\x1b[0m\r\n`;
     rec.rawOutput += footer;
     rec.output = stripAnsiForWeb(rec.rawOutput);
     rec.detectedUrls = extractDetectedUrls(rec.rawOutput);
-    broadcast("cli-output", { id: rec.id, fullOutput: rec.output, detectedUrls: rec.detectedUrls });
+    broadcast("cli-chunk", { id: rec.id, raw: footer, detectedUrls: rec.detectedUrls });
     broadcastCliSessions();
   };
 
   child.on("error", (err) => {
-    rec.output += `\n[spawn error] ${err.message}\n`;
+    const errChunk = `\r\n\x1b[31m[spawn error] ${err.message}\x1b[0m\r\n`;
+    rec.rawOutput += errChunk;
+    broadcast("cli-chunk", { id: rec.id, raw: errChunk, detectedUrls: rec.detectedUrls });
     finalize(1, null);
   });
   child.on("close", (code, signal) => finalize(code, signal));
@@ -1076,6 +1086,19 @@ function startCliSession(command, requestedCwd) {
   }
   broadcastCliSessions();
   return rec;
+}
+
+function resizeCliSession(id, cols, rows) {
+  const rec = cliSessions.get(id);
+  if (!rec || rec.status !== "running" || !rec.child?.stdin?.writable) return false;
+  const c = Math.max(40, Math.min(300, Number(cols) || 120));
+  const r = Math.max(12, Math.min(120, Number(rows) || 34));
+  try {
+    rec.child.stdin.write(`\x1b]9999;resize;${c};${r}\x07`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function stopCliSession(id) {
@@ -1205,6 +1228,28 @@ const server = http.createServer(async (req, res) => {
         { "Set-Cookie": `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}` }
       );
       return;
+    }
+
+    // Vendored xterm.js static assets
+    if (req.method === "GET" && p.startsWith("/vendor/")) {
+      const name = path.basename(p);
+      const allowed = {
+        "xterm.js": "application/javascript; charset=utf-8",
+        "addon-fit.js": "application/javascript; charset=utf-8",
+        "xterm.css": "text/css; charset=utf-8",
+      };
+      if (allowed[name]) {
+        const filePath = path.join(PUBLIC_DIR, "vendor", name);
+        if (fs.existsSync(filePath)) {
+          res.writeHead(200, {
+            "Content-Type": allowed[name],
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+          });
+          res.end(fs.readFileSync(filePath));
+          return;
+        }
+      }
     }
 
     // Main SPA HTML (renders Login screen until authenticated)
@@ -1432,11 +1477,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = await readJsonBody(req);
-      const rec = startCliSession(body.command, body.cwd);
+      const rec = startCliSession(body.command, body.cwd, body.cols, body.rows);
       sendJson(res, 202, {
         ok: true,
         session: summarizeCliSession(rec),
         output: rec.output,
+        rawOutput: rec.rawOutput,
         detectedUrls: rec.detectedUrls,
         sessions: listCliSessionsSummary(),
       });
@@ -1454,12 +1500,13 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         session: summarizeCliSession(rec),
         output: rec.output,
+        rawOutput: rec.rawOutput,
         detectedUrls: rec.detectedUrls || [],
       });
       return;
     }
 
-    const cliActionMatch = /^\/api\/cli\/sessions\/([A-Za-z0-9_-]+)\/(input|stop)$/.exec(p);
+    const cliActionMatch = /^\/api\/cli\/sessions\/([A-Za-z0-9_-]+)\/(input|stop|resize)$/.exec(p);
     if (cliActionMatch && req.method === "POST") {
       if (!isSameOrigin(req)) {
         sendJson(res, 403, { ok: false, error: "Cross-origin request blocked." });
@@ -1474,6 +1521,12 @@ const server = http.createServer(async (req, res) => {
       if (action === "stop") {
         const stopped = stopCliSession(sid);
         sendJson(res, 200, { ok: true, stopped, session: summarizeCliSession(rec) });
+        return;
+      }
+      if (action === "resize") {
+        const body = await readJsonBody(req);
+        const ok = resizeCliSession(sid, body.cols, body.rows);
+        sendJson(res, 200, { ok });
         return;
       }
       if (action === "input") {
@@ -1520,6 +1573,66 @@ server.on("upgrade", (req, socket) => {
   );
   wsClients.add(socket);
   socket.write(encodeWsTextFrame(JSON.stringify({ type: "snapshot", payload: getFullState(), ts: new Date().toISOString() })));
+
+  // Decode masked RFC 6455 client frames for low-latency direct xterm.js keystrokes & resize
+  let wsBuf = Buffer.alloc(0);
+  socket.on("data", (chunk) => {
+    wsBuf = wsBuf.length ? Buffer.concat([wsBuf, chunk]) : Buffer.from(chunk);
+    if (wsBuf.length > 256 * 1024) {
+      socket.destroy();
+      return;
+    }
+    while (wsBuf.length >= 2) {
+      const b0 = wsBuf[0];
+      const b1 = wsBuf[1];
+      const opcode = b0 & 0x0f;
+      const masked = (b1 & 0x80) !== 0;
+      let len = b1 & 0x7f;
+      let off = 2;
+      if (len === 126) {
+        if (wsBuf.length < 4) return;
+        len = wsBuf.readUInt16BE(2);
+        off = 4;
+      } else if (len === 127) {
+        socket.destroy();
+        return;
+      }
+      const maskLen = masked ? 4 : 0;
+      if (wsBuf.length < off + maskLen + len) return;
+      const mask = masked ? wsBuf.subarray(off, off + 4) : null;
+      off += maskLen;
+      const payload = Buffer.from(wsBuf.subarray(off, off + len));
+      wsBuf = wsBuf.subarray(off + len);
+      if (mask) {
+        for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i & 3];
+      }
+      if (opcode === 0x08) {
+        wsClients.delete(socket);
+        socket.end();
+        return;
+      }
+      if (opcode === 0x09) {
+        // Respond to ping with pong
+        const pong = Buffer.concat([Buffer.from([0x8a, payload.length]), payload]);
+        try { socket.write(pong); } catch {}
+        continue;
+      }
+      if (opcode === 0x01) {
+        try {
+          const msg = JSON.parse(payload.toString("utf8"));
+          if (msg.type === "cli-input" && typeof msg.id === "string" && typeof msg.data === "string") {
+            const rec = cliSessions.get(msg.id);
+            if (rec && rec.status === "running" && rec.child?.stdin?.writable) {
+              rec.child.stdin.write(msg.data, "utf8");
+            }
+          } else if (msg.type === "cli-resize" && typeof msg.id === "string") {
+            resizeCliSession(msg.id, msg.cols, msg.rows);
+          }
+        } catch {}
+      }
+    }
+  });
+
   socket.on("close", () => wsClients.delete(socket));
   socket.on("error", () => wsClients.delete(socket));
   socket.on("end", () => wsClients.delete(socket));

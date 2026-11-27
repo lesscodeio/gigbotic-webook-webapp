@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gigbotic Managed Relay — Multi-Agent Console</title>
+  <link rel="stylesheet" href="/vendor/xterm.css" />
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
   <style>
     :root {
       --canvas: #f6f5f2;
@@ -262,6 +265,10 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #a7c5ff;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px;
     }
+    .xterm-wrap {
+      background: #0f1320; padding: 10px 12px; height: 460px; overflow: hidden;
+    }
+    .xterm-wrap .xterm { height: 100%; }
     .terminal-body a { color: #7db4ff; text-decoration: underline; }
     .hidden { display: none !important; }
   </style>
@@ -377,13 +384,14 @@
         <div>
           <div class="terminal-card">
             <div class="terminal-head">
-              <span id="cliTermTitle">Choose an action above or run a custom command</span>
+              <span id="cliTermTitle">Click inside terminal to type directly • Select an action above or open Bash</span>
               <div style="display:flex;gap:8px">
-                <button type="button" class="btn sm" id="cliRefreshBtn">Refresh</button>
+                <button type="button" class="btn sm" id="openBashBtn">Open Bash Shell</button>
+                <button type="button" class="btn sm" id="cliRefreshBtn">Reload</button>
                 <button type="button" class="btn sm danger hidden" id="cliStopBtn">Stop</button>
               </div>
             </div>
-            <pre class="terminal-body" id="cliTermBody">Ready. Select a tool tab above (Antigravity, Codex, Claude Code, or Server) to log in, manage Gigbotic MCP, or run any CLI command.</pre>
+            <div id="cliXterm" class="xterm-wrap"></div>
             <div id="cliDetectedUrls" class="detected-urls hidden"></div>
             <form id="cliStdinForm" class="stdin-bar">
               <input id="cliStdinInput" class="stdin-input" placeholder="Paste OAuth code, type /logout, or answer interactive prompts…" />
@@ -507,6 +515,10 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       activeTab: "webhooks",
       viaProxy: false,
       wsConnected: false,
+      ws: null,
+      xterm: null,
+      fitAddon: null,
+      lastRawLen: 0,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -765,8 +777,10 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       $("tab-webhooks").classList.toggle("hidden", tabName !== "webhooks");
       $("tab-runs").classList.toggle("hidden", tabName !== "runs");
       $("tab-cli").classList.toggle("hidden", tabName !== "cli");
-      if (tabName === "cli" && !state.cliAuthStatus) {
-        void refreshCliAuthStatus(true);
+      if (tabName === "cli") {
+        ensureXterm();
+        setTimeout(() => fitXtermAndNotify(), 50);
+        if (!state.cliAuthStatus) void refreshCliAuthStatus(true);
       }
     }
     document.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => switchTab(el.dataset.tab)));
@@ -922,6 +936,71 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       });
     }
 
+    function ensureXterm() {
+      if (state.xterm) return state.xterm;
+      const mount = $("cliXterm");
+      if (!mount || typeof window.Terminal !== "function") return null;
+      const term = new window.Terminal({
+        cursorBlink: true,
+        convertEol: false,
+        scrollback: 5000,
+        fontSize: 13,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        theme: {
+          background: "#0f1320",
+          foreground: "#e6ebf5",
+          cursor: "#9cb3e8",
+          selectionBackground: "rgba(125, 180, 255, 0.28)",
+        },
+      });
+      const fit = window.FitAddon ? new window.FitAddon.FitAddon() : null;
+      if (fit) term.loadAddon(fit);
+      term.open(mount);
+      if (fit) fit.fit();
+      term.writeln("\x1b[90mReady. Select an action above (Antigravity, Codex, Claude Code) or click Open Bash Shell.\x1b[0m");
+      term.writeln("\x1b[90mClick anywhere inside this terminal to type directly (arrows, Enter, Ctrl+C, Cmd/Ctrl+V paste).\x1b[0m");
+
+      term.onData((data) => {
+        if (!state.selectedCliId) return;
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({ type: "cli-input", id: state.selectedCliId, data }));
+        } else {
+          void sendCliRawInput(data, false);
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (state.activeTab === "cli") fitXtermAndNotify();
+      });
+
+      state.xterm = term;
+      state.fitAddon = fit;
+      return term;
+    }
+
+    function fitXtermAndNotify() {
+      if (!state.xterm || !state.fitAddon) return;
+      try {
+        state.fitAddon.fit();
+        if (state.selectedCliId) {
+          const cols = state.xterm.cols || 120;
+          const rows = state.xterm.rows || 34;
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ type: "cli-resize", id: state.selectedCliId, cols, rows }));
+          }
+        }
+      } catch {}
+    }
+
+    function writeXtermFull(rawText) {
+      const term = ensureXterm();
+      if (!term) return;
+      term.reset();
+      if (rawText) term.write(rawText);
+      state.lastRawLen = (rawText || "").length;
+      term.focus();
+    }
+
     async function fetchCliSession(id, silent = false) {
       const res = await fetch(`/api/cli/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
       if (!res.ok) return null;
@@ -931,12 +1010,18 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       if (idx !== -1) state.cliSessions[idx] = data.session;
       renderCliSessions();
       $("cliTermTitle").textContent = `$ ${data.session.command} [${data.session.status}]`;
-      const body = $("cliTermBody");
-      const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
-      body.innerHTML = linkifyTerminal(data.output || "");
+      const raw = typeof data.rawOutput === "string" ? data.rawOutput : (data.output || "");
+      const term = ensureXterm();
+      if (term) {
+        if (!silent) {
+          writeXtermFull(raw);
+        } else if (raw.length > state.lastRawLen) {
+          term.write(raw.slice(state.lastRawLen));
+          state.lastRawLen = raw.length;
+        }
+      }
       renderDetectedUrls(data.detectedUrls || []);
       checkOAuthHelperHighlight((data.output || "") + "\n" + (data.detectedUrls || []).join("\n"));
-      if (nearBottom || !silent) body.scrollTop = body.scrollHeight;
       return data.session;
     }
 
@@ -1134,10 +1219,14 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
     async function executeCliCommand(command) {
       const cmd = String(command || "").trim();
       if (!cmd) return;
+      const term = ensureXterm();
+      if (state.fitAddon) { try { state.fitAddon.fit(); } catch {} }
+      const cols = term?.cols || 120;
+      const rows = term?.rows || 34;
       const res = await fetch("/api/cli/exec", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: cmd }),
+        body: JSON.stringify({ command: cmd, cols, rows }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -1148,7 +1237,7 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       state.selectedCliId = data.session.id;
       renderCliSessions();
       $("cliTermTitle").textContent = `$ ${data.session.command} [running]`;
-      $("cliTermBody").innerHTML = linkifyTerminal(data.output || "");
+      writeXtermFull(data.rawOutput || data.output || "");
       renderDetectedUrls(data.detectedUrls || []);
       checkOAuthHelperHighlight(data.output || "");
       scheduleCliWatch(data.session.id);
@@ -1230,8 +1319,10 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       });
     });
 
+    $("openBashBtn").addEventListener("click", () => void executeCliCommand("bash -i"));
+
     $("cliRefreshBtn").addEventListener("click", () => {
-      if (state.selectedCliId) void fetchCliSession(state.selectedCliId);
+      if (state.selectedCliId) void fetchCliSession(state.selectedCliId, false);
     });
     renderCliToolPanel();
 
@@ -1245,6 +1336,7 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       const open = () => {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         const ws = new WebSocket(`${proto}//${location.host}/ws`);
+        state.ws = ws;
         ws.onopen = () => {
           wsRetry = 0;
           state.wsConnected = true;
@@ -1258,19 +1350,16 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
           else if (msg.type === "webhooks") { state.webhooks = msg.payload || []; renderWebhooks(); }
           else if (msg.type === "runs") { state.runs = msg.payload?.runs || []; renderRuns(); }
           else if (msg.type === "cli-sessions") { state.cliSessions = msg.payload || []; renderCliSessions(); }
-          else if (msg.type === "cli-output" && msg.payload?.id === state.selectedCliId) {
-            const body = $("cliTermBody");
-            const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
-            if (typeof msg.payload.fullOutput === "string") {
-              body.innerHTML = linkifyTerminal(msg.payload.fullOutput);
-            } else {
-              body.innerHTML += linkifyTerminal(msg.payload.text || "");
+          else if (msg.type === "cli-chunk" && msg.payload?.id === state.selectedCliId) {
+            const term = ensureXterm();
+            if (term && typeof msg.payload.raw === "string") {
+              term.write(msg.payload.raw);
+              state.lastRawLen += msg.payload.raw.length;
             }
             if (Array.isArray(msg.payload.detectedUrls)) {
               renderDetectedUrls(msg.payload.detectedUrls);
+              checkOAuthHelperHighlight(msg.payload.detectedUrls.join("\n"));
             }
-            checkOAuthHelperHighlight(body.textContent + "\n" + (msg.payload.detectedUrls || []).join("\n"));
-            if (nearBottom) body.scrollTop = body.scrollHeight;
           }
           else if (msg.type === "settings") { state.settings = msg.payload; $("concurrencySelect").value = String(state.settings.maxConcurrency || 2); }
           else if (msg.type === "run-output" && msg.payload?.deliveryId === state.selectedRunId) {
@@ -1281,6 +1370,7 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
           }
         };
         ws.onclose = () => {
+          if (state.ws === ws) state.ws = null;
           state.wsConnected = false;
           $("wsBadge").className = "pill warn";
           $("wsBadge").innerHTML = '<span class="dot"></span>Reconnecting…';
