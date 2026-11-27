@@ -852,9 +852,18 @@ export function buildCodexIsolatedConfigToml({
  * Note: `agy 1.5+` rejects `mcpServers` inside `--settings`; job-scoped MCP servers
  * are written to `<fakeHomeDir>/.gemini/config/mcp_config.json` instead.
  */
-export function buildAgySessionSettings({ executionPolicy }) {
+export function buildAgySessionSettings({ executionPolicy, inDocker = false }) {
   const isMcpOnly = executionPolicy.sandboxMode === "mcp_only";
   const isReadOnly = executionPolicy.sandboxMode === "read_only";
+  // Inside our hardened Docker container (--read-only rootfs, --cap-drop=ALL,
+  // --security-opt no-new-privileges:true, :ro AGENTS.md, --internal network + egress proxy),
+  // Agy's nested Linux terminal sandbox hits EPERM ("operation not permitted") on shell commands
+  // and triggers BypassSandbox safety halts. Delegate kernel sandboxing to Docker strictly when
+  // `inDocker && workspace_write && allowShell`; keep `enableTerminalSandbox` + `proceed-in-sandbox`
+  // on all native host runs and in mcp_only / read_only.
+  const useContainerAsSandbox = Boolean(
+    inDocker && !isMcpOnly && !isReadOnly && executionPolicy.allowShell
+  );
 
   let permissions;
   if (isMcpOnly) {
@@ -903,9 +912,9 @@ export function buildAgySessionSettings({ executionPolicy }) {
 
   return {
     agentMode: "auto",
-    enableTerminalSandbox: true,
+    enableTerminalSandbox: !useContainerAsSandbox,
     allowNonWorkspaceAccess: false,
-    toolPermission: "proceed-in-sandbox",
+    toolPermission: useContainerAsSandbox ? "always-proceed" : "proceed-in-sandbox",
     permissions,
   };
 }
@@ -1152,7 +1161,7 @@ export function prepareHardenedJobEnvironment({
   fs.writeFileSync(
     agySettingsPath,
     JSON.stringify(
-      buildAgySessionSettings({ executionPolicy }),
+      buildAgySessionSettings({ executionPolicy, inDocker }),
       null,
       2
     ),
@@ -1380,8 +1389,16 @@ export function buildHardenedCliInvocation({
     return { bin, args, stdinPayload: null };
   }
 
-  // Antigravity CLI (`agy`) — mode & tool permissions enforced via `--settings <agy-settings.json>`
-  const args = ["--sandbox", "--new-project", "--disable-slash-commands"];
+  // Antigravity CLI (`agy`) — mode & tool permissions enforced via `--settings <agy-settings.json>`.
+  // Inside our hardened Docker container with workspace_write+allowShell, omit `--sandbox` so
+  // nested Linux sandboxing does not hit EPERM under `--cap-drop=ALL`; keep `--sandbox` on all
+  // native host runs and in mcp_only / read_only.
+  const useContainerAsSandbox = Boolean(inDocker && mode === "workspace_write" && allowShell);
+  const args = [
+    ...(useContainerAsSandbox ? [] : ["--sandbox"]),
+    "--new-project",
+    "--disable-slash-commands",
+  ];
   if (agySettingsPath) {
     args.push("--settings", agySettingsPath);
   }

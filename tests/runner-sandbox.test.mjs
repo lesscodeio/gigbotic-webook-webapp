@@ -174,6 +174,11 @@ describe("Layer 4 — CLI Sandbox Flag Matrix (zero --dangerously-* flags)", () 
       });
       const settingsJson = JSON.parse(fs.readFileSync(envSetup.agySettingsPath, "utf8"));
       assert.equal(settingsJson.mcpServers, undefined);
+      assert.equal(settingsJson.enableTerminalSandbox, false);
+      assert.equal(settingsJson.toolPermission, "always-proceed");
+      const nativeSettings = buildAgySessionSettings({ executionPolicy: policy, inDocker: false });
+      assert.equal(nativeSettings.enableTerminalSandbox, true);
+      assert.equal(nativeSettings.toolPermission, "proceed-in-sandbox");
       const mcpCfg = JSON.parse(
         fs.readFileSync(path.join(envSetup.fakeHomeDir, ".gemini", "config", "mcp_config.json"), "utf8")
       );
