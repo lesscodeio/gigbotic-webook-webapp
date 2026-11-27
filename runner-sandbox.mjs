@@ -613,15 +613,39 @@ export async function prefetchPinnedCoreFiles({
     }
   }
 
-  const files = Array.isArray(data.files) ? data.files : [];
-  for (const f of files) {
-    const content = String(f.content ?? "");
+  const tier1Preamble =
+    typeof data.tier_1_security_preamble === "string" ? data.tier_1_security_preamble : "";
+  const preamblePrefix = tier1Preamble ? `${tier1Preamble}\n\n` : "";
+  const rawFiles = Array.isArray(data.files) ? data.files : [];
+  const files = [];
+  for (const f of rawFiles) {
+    let content = String(f.content ?? "");
     if (f.sha256 && sha256Hex(content) !== f.sha256) {
-      throw new Error(`CORE_FILES_PREFETCH_FAILED: SHA-256 mismatch on core file '${f.path}'.`);
+      if (preamblePrefix && content.startsWith(preamblePrefix)) {
+        const stripped = content.slice(preamblePrefix.length);
+        if (sha256Hex(stripped) === f.sha256) {
+          content = stripped;
+        } else {
+          throw new Error(`CORE_FILES_PREFETCH_FAILED: SHA-256 mismatch on core file '${f.path}'.`);
+        }
+      } else {
+        throw new Error(`CORE_FILES_PREFETCH_FAILED: SHA-256 mismatch on core file '${f.path}'.`);
+      }
     }
+    files.push({ ...f, content });
   }
 
-  const cacheDir = saveVerifiedCachedCoreFiles(cacheRoot, agentId, expectedVersion, data);
+  const cacheToken =
+    typeof data.cache_hint?.cache_token === "string"
+      ? data.cache_hint.cache_token
+      : typeof data.core_files_cache_token === "string"
+        ? data.core_files_cache_token
+        : null;
+  const cacheDir = saveVerifiedCachedCoreFiles(cacheRoot, agentId, expectedVersion, {
+    ...data,
+    files,
+    core_files_cache_token: cacheToken,
+  });
   return {
     required: true,
     loaded: true,
