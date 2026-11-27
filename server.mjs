@@ -1022,7 +1022,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const token = signSessionToken(authConfig.username);
-      const secureFlag = proxied || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+      const isHttps = req.headers["x-forwarded-proto"] === "https" || req.headers["x-via-public-proxy"] === "1";
+      const secureFlag = isHttps ? "; Secure" : "";
       sendJson(
         res,
         200,
@@ -1033,7 +1034,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && p === "/api/auth/logout") {
-      const secureFlag = proxied || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+      const isHttps = req.headers["x-forwarded-proto"] === "https" || req.headers["x-via-public-proxy"] === "1";
+      const secureFlag = isHttps ? "; Secure" : "";
       sendJson(
         res,
         200,
