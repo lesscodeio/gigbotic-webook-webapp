@@ -429,6 +429,8 @@ export function createEgressProxyServer(options = {}) {
   };
 
   const server = http.createServer(async (req, res) => {
+    req.on("error", () => {});
+    res.on("error", () => {});
     const token = parseProxyToken(req.headers["proxy-authorization"]);
     const entry = timingSafeLookupPolicy(activePolicies, token);
     if (!entry) {
@@ -526,10 +528,19 @@ export function createEgressProxyServer(options = {}) {
     req.pipe(upstreamReq);
   });
 
+  server.on("clientError", (_err, sock) => {
+    try {
+      sock.destroy();
+    } catch {}
+  });
+
   server.on("connect", async (req, clientSocket, head) => {
+    clientSocket.on("error", () => {});
     const rejectSocket = (statusLine, body = "") => {
       try {
-        clientSocket.end(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n${body}`);
+        if (!clientSocket.destroyed) {
+          clientSocket.end(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n${body}`);
+        }
       } catch {}
     };
 
@@ -577,6 +588,8 @@ export function createEgressProxyServer(options = {}) {
       rejectSocket("403 Forbidden", `Blocked by Gigbotic DNS guard (${err?.code || "dns_blocked"})`);
       return;
     }
+
+    if (clientSocket.destroyed) return;
 
     const upstream = net.connect({
       host: resolved.address,

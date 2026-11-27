@@ -900,6 +900,8 @@ function seedMinimalCliAuthInFakeHome({ engine, realHomeDir, fakeHomeDir }) {
     copySingleReadOnly(path.join(realHomeDir, ".claude.json"), ".claude.json");
   } else if (engine === "agy") {
     for (const rel of [
+      path.join(".gemini", "antigravity-cli", "antigravity-oauth-token"),
+      path.join(".config", "antigravity", "credential-user-scope"),
       path.join(".gemini", "antigravity-cli", "auth.json"),
       path.join(".gemini", "antigravity-cli", "token.json"),
       path.join(".gemini", "antigravity-cli", "credentials.json"),
