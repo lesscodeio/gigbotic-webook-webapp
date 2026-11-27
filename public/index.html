@@ -184,27 +184,72 @@
     }
     .toast.show { opacity: 1; }
     .cli-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-    .preset-btn {
-      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-      border-radius: 999px; padding: 5px 11px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      cursor: pointer;
+    .cli-tool-tabs {
+      display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 14px;
+      background: var(--inset);
     }
-    .preset-btn:hover { background: #f2f0ff; border-color: #c8c0ff; color: var(--accent-deep); }
-    .cli-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .cli-tool-tab {
+      border: 0; background: transparent; padding: 7px 14px; border-radius: 10px;
+      font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+      display: inline-flex; align-items: center; gap: 7px;
+    }
+    .cli-tool-tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .cli-groups {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px;
+      margin: 14px 0;
+    }
+    .cli-group {
+      background: var(--canvas); border: 1px solid var(--line); border-radius: 14px;
+      padding: 13px 14px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .cli-group-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted); display: flex; align-items: center; justify-content: space-between;
+    }
+    .cli-action-row { display: flex; flex-wrap: wrap; gap: 7px; }
+    .act-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+      border-radius: 10px; padding: 7px 12px; font-size: 12.5px; font-weight: 600;
+      cursor: pointer; transition: background 0.14s, border-color 0.14s;
+    }
+    .act-btn:hover { background: #f2f0ff; border-color: #c8c0ff; color: var(--accent-deep); }
+    .act-btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .act-btn.primary:hover { background: #262d42; color: #fff; border-color: #262d42; }
+    .act-btn.danger { color: var(--danger-ink); border-color: #f3c4c4; background: #fffafa; }
+    .act-btn.danger:hover { background: var(--danger-bg); border-color: #e69c9c; color: var(--danger-ink); }
+    .cli-hint { font-size: 12px; color: var(--muted); margin: 0; }
+    .cli-bar { display: flex; gap: 8px; flex-wrap: wrap; }
     .cli-input {
       flex: 1; min-width: 240px; padding: 10px 14px; border-radius: 12px;
-      border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+      border: 1px solid var(--line); background: var(--canvas); color: var(--ink);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
     }
     .stdin-bar {
-      display: flex; gap: 8px; padding: 10px 14px; background: #161c2e;
-      border-top: 1px solid #222940; flex-wrap: wrap;
+      display: flex; gap: 6px; padding: 10px 14px; background: #161c2e;
+      border-top: 1px solid #222940; flex-wrap: wrap; align-items: center;
     }
     .stdin-input {
-      flex: 1; min-width: 180px; padding: 7px 11px; border-radius: 10px;
+      flex: 1; min-width: 190px; padding: 7px 11px; border-radius: 10px;
       border: 1px solid #2c3552; background: #0b0e18; color: #e6ebf5;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
     }
+    .key-bar {
+      display: flex; gap: 5px; padding: 7px 14px 10px; background: #121726;
+      border-top: 1px solid #1e2438; flex-wrap: wrap; align-items: center;
+    }
+    .key-btn {
+      border: 1px solid #2e3754; background: #1b2236; color: #cfd7ec;
+      border-radius: 8px; padding: 4px 9px; font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer;
+    }
+    .key-btn:hover { background: #283250; color: #fff; }
+    .oauth-helper {
+      margin-top: 12px; padding: 12px 14px; border-radius: 14px;
+      border: 1px solid var(--line); background: var(--surface);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .oauth-helper.highlight { border-color: #a99cff; background: #f5f3ff; }
     .terminal-body a { color: #7db4ff; text-decoration: underline; }
     .hidden { display: none !important; }
   </style>
@@ -291,57 +336,67 @@
     </section>
     <section id="tab-cli" class="hidden">
       <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
-            <h3 class="card-title">Direct Server CLI &amp; MCP Setup</h3>
-            <div class="sub">Runs inside your server <code>$HOME</code> with <code>agy</code>, <code>codex</code>, <code>claude</code>, <code>node</code>, and <code>pm2</code> preloaded.</div>
+            <h3 class="card-title">CLI Account, MCP &amp; Terminal</h3>
+            <div class="sub">One-click login, logout, and Gigbotic MCP management for each CLI inside an interactive PTY.</div>
           </div>
-          <span class="pill info">Interactive PTY</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div class="cli-tool-tabs" id="cliToolTabs">
+              <button type="button" class="cli-tool-tab active" data-tool="agy">Antigravity (agy) <span id="authDot-agy" class="dot" style="color:var(--muted)"></span></button>
+              <button type="button" class="cli-tool-tab" data-tool="codex">Codex <span id="authDot-codex" class="dot" style="color:var(--muted)"></span></button>
+              <button type="button" class="cli-tool-tab" data-tool="claude">Claude Code <span id="authDot-claude" class="dot" style="color:var(--muted)"></span></button>
+              <button type="button" class="cli-tool-tab" data-tool="system">Server &amp; GPU</button>
+            </div>
+            <button type="button" class="btn sm" id="checkAuthBtn">Check Auth Status</button>
+          </div>
         </div>
 
-        <div class="cli-presets">
-          <button type="button" class="preset-btn" data-cmd="agy mcp list">agy mcp list</button>
-          <button type="button" class="preset-btn" data-cmd="agy mcp add gigbotic https://gigbotic.com/mcp">agy mcp add gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="codex mcp list">codex mcp list</button>
-          <button type="button" class="preset-btn" data-cmd="codex mcp add gigbotic --url https://gigbotic.com/mcp">codex mcp add gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="claude mcp list">claude mcp list</button>
-          <button type="button" class="preset-btn" data-cmd="claude mcp add --transport http gigbotic https://gigbotic.com/mcp">claude mcp add gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="agy mcp remove gigbotic">agy mcp remove gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="codex mcp remove gigbotic">codex mcp remove gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="claude mcp remove gigbotic">claude mcp remove gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="codex mcp login gigbotic">codex mcp login gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="codex mcp logout gigbotic">codex mcp logout gigbotic</button>
-          <button type="button" class="preset-btn" data-cmd="codex login status && claude auth status">check logins</button>
-          <button type="button" class="preset-btn" data-cmd="pm2 status">pm2 status</button>
-        </div>
-
-        <form id="oauthCbForm" class="cli-bar" style="margin-bottom:10px">
-          <input id="oauthCbInput" class="cli-input" placeholder="Paste failed http://127.0.0.1:<port>/callback?... URL here to finish OAuth login" />
-          <button type="submit" class="btn">Complete OAuth Callback</button>
-        </form>
+        <div id="cliToolPanel"></div>
 
         <form id="cliForm" class="cli-bar">
-          <input id="cliCmdInput" class="cli-input" placeholder="Enter any command, e.g. agy mcp add gigbotic https://gigbotic.com/mcp" required />
+          <input id="cliCmdInput" class="cli-input" placeholder="Or type any custom command, e.g. agy mcp add --header &quot;Authorization: Bearer ...&quot; myserver https://..." required />
           <button type="submit" class="btn primary">Run Command</button>
         </form>
       </div>
 
       <div class="runs-layout">
         <div class="run-list" id="cliSessionList"></div>
-        <div class="terminal-card">
-          <div class="terminal-head">
-            <span id="cliTermTitle">Run a command above or select a session</span>
-            <div style="display:flex;gap:8px">
-              <button type="button" class="btn sm" id="cliRefreshBtn">Refresh</button>
-              <button type="button" class="btn sm danger hidden" id="cliStopBtn">Stop</button>
+        <div>
+          <div class="terminal-card">
+            <div class="terminal-head">
+              <span id="cliTermTitle">Choose an action above or run a custom command</span>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn sm" id="cliRefreshBtn">Refresh</button>
+                <button type="button" class="btn sm danger hidden" id="cliStopBtn">Stop</button>
+              </div>
+            </div>
+            <pre class="terminal-body" id="cliTermBody">Ready. Select a tool tab above (Antigravity, Codex, Claude Code, or Server) to log in, manage Gigbotic MCP, or run any CLI command.</pre>
+            <form id="cliStdinForm" class="stdin-bar">
+              <input id="cliStdinInput" class="stdin-input" placeholder="Paste OAuth code, type /logout, or answer interactive prompts…" />
+              <button type="submit" class="btn sm primary">Send + Enter</button>
+            </form>
+            <div class="key-bar">
+              <span style="font-size:11px;color:#8e98b3;margin-right:4px">PTY Keys:</span>
+              <button type="button" class="key-btn" data-key="enter">Enter</button>
+              <button type="button" class="key-btn" data-key="up">↑ Up</button>
+              <button type="button" class="key-btn" data-key="down">↓ Down</button>
+              <button type="button" class="key-btn" data-key="logout">/logout</button>
+              <button type="button" class="key-btn" data-key="exit">/exit</button>
+              <button type="button" class="key-btn" data-key="ctrld">Ctrl+D</button>
+              <button type="button" class="key-btn" data-key="ctrlc">Ctrl+C</button>
             </div>
           </div>
-          <pre class="terminal-body" id="cliTermBody">Ready. Pick a preset or type a command above.</pre>
-          <form id="cliStdinForm" class="stdin-bar">
-            <input id="cliStdinInput" class="stdin-input" placeholder="Send stdin / paste OAuth code or answer prompts…" />
-            <button type="submit" class="btn sm primary">Send + Enter</button>
-            <button type="button" class="btn sm" id="cliCtrlCBtn">Ctrl+C</button>
-          </form>
+
+          <div class="oauth-helper" id="oauthHelperBox">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:12px;font-weight:600;color:var(--ink)">Loopback OAuth Helper <span class="sub">(only needed if login redirects your browser to a failed <code>http://127.0.0.1:...</code> URL)</span></span>
+            </div>
+            <form id="oauthCbForm" class="cli-bar">
+              <input id="oauthCbInput" class="cli-input" placeholder="Paste failed http://127.0.0.1:<port>/callback?... URL here" />
+              <button type="submit" class="btn sm primary">Complete OAuth Callback</button>
+            </form>
+          </div>
         </div>
       </div>
     </section>
@@ -434,6 +489,8 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       cliSessions: [],
       selectedCliId: null,
       cliWatchTimer: null,
+      activeCliTool: "agy",
+      cliAuthStatus: null,
       activeTab: "webhooks",
       viaProxy: false,
       wsConnected: false,
@@ -695,6 +752,9 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       $("tab-webhooks").classList.toggle("hidden", tabName !== "webhooks");
       $("tab-runs").classList.toggle("hidden", tabName !== "runs");
       $("tab-cli").classList.toggle("hidden", tabName !== "cli");
+      if (tabName === "cli" && !state.cliAuthStatus) {
+        void refreshCliAuthStatus(true);
+      }
     }
     document.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => switchTab(el.dataset.tab)));
 
@@ -839,12 +899,231 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
       setTimeout(() => void fetchCliSession(id), 400);
     }
 
-    document.querySelectorAll(".preset-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        $("cliCmdInput").value = btn.dataset.cmd || "";
-        $("cliCmdInput").focus();
+    const CLI_CATALOG = {
+      agy: {
+        authNote: "Interactive SSH OAuth: click Login, open the printed Google URL, paste the code into the terminal input bar below, then press /exit or Ctrl+D.",
+        groups: [
+          {
+            title: "Account & Authentication",
+            actions: [
+              { label: "Login / Open agy", cmd: "agy", kind: "primary" },
+              { label: "Check Models (Verify Auth)", cmd: "agy models" },
+              { label: "Logout (Open agy → /logout)", cmd: "agy", hint: "Once agy opens, click the /logout PTY key button below.", kind: "danger" },
+            ],
+          },
+          {
+            title: "Gigbotic MCP",
+            actions: [
+              { label: "List MCP Servers", cmd: "agy mcp list" },
+              { label: "Add Gigbotic MCP", cmd: "agy mcp add gigbotic https://gigbotic.com/mcp", kind: "primary" },
+              { label: "Remove Gigbotic MCP", cmd: "agy mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Antigravity?" },
+            ],
+          },
+        ],
+      },
+      codex: {
+        authNote: "Device-code login works cleanly without any localhost redirect — open the URL and enter the 8-character code shown in the terminal.",
+        groups: [
+          {
+            title: "Account & Authentication",
+            actions: [
+              { label: "Login (Device Auth)", cmd: "codex login --device-auth", kind: "primary" },
+              { label: "Check Login Status", cmd: "codex login status" },
+              { label: "Logout Codex", cmd: "codex logout", kind: "danger", confirm: "Log out of Codex CLI on this server?" },
+            ],
+          },
+          {
+            title: "Gigbotic MCP",
+            actions: [
+              { label: "List MCP", cmd: "codex mcp list" },
+              { label: "Add Gigbotic MCP", cmd: "codex mcp add gigbotic --url https://gigbotic.com/mcp", kind: "primary" },
+              { label: "Login Gigbotic MCP", cmd: "codex mcp login gigbotic" },
+              { label: "Logout Gigbotic MCP", cmd: "codex mcp logout gigbotic", confirm: "Log out of Gigbotic MCP in Codex?" },
+              { label: "Remove Gigbotic MCP", cmd: "codex mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Codex?" },
+            ],
+          },
+        ],
+      },
+      claude: {
+        authNote: "Click Login, open the printed Anthropic URL in your browser, copy the authorization code, and paste it into the input bar below.",
+        groups: [
+          {
+            title: "Account & Authentication",
+            actions: [
+              { label: "Login (Claude.ai)", cmd: "claude auth login", kind: "primary" },
+              { label: "Login (API Console)", cmd: "claude auth login --console" },
+              { label: "Check Auth Status", cmd: "claude auth status" },
+              { label: "Logout Claude", cmd: "claude auth logout", kind: "danger", confirm: "Log out of Claude Code CLI on this server?" },
+            ],
+          },
+          {
+            title: "Gigbotic MCP",
+            actions: [
+              { label: "List MCP", cmd: "claude mcp list" },
+              { label: "Add Gigbotic MCP", cmd: "claude mcp add --transport http gigbotic https://gigbotic.com/mcp", kind: "primary" },
+              { label: "Remove Gigbotic MCP", cmd: "claude mcp remove gigbotic", kind: "danger", confirm: "Remove 'gigbotic' MCP server from Claude Code?" },
+            ],
+          },
+        ],
+      },
+      system: {
+        authNote: "Quick diagnostics for PM2, relay logs, GPU utilization, memory, and disk.",
+        groups: [
+          {
+            title: "Relay Service",
+            actions: [
+              { label: "PM2 Status", cmd: "pm2 status", kind: "primary" },
+              { label: "Relay Logs (40 lines)", cmd: "pm2 logs gigbotic-managed-relay --nostream --lines 40" },
+              { label: "Check All CLI Versions", cmd: "node -v && codex --version && claude --version && agy --version" },
+            ],
+          },
+          {
+            title: "Hardware & Storage",
+            actions: [
+              { label: "GPU Status (nvidia-smi)", cmd: "nvidia-smi" },
+              { label: "RAM & Disk Usage", cmd: "free -h && echo && df -h /" },
+              { label: "List Isolated Job Dirs", cmd: "ls -la ~/.gigbotic/isolated-jobs" },
+            ],
+          },
+        ],
+      },
+    };
+
+    function updateAuthDots() {
+      const st = state.cliAuthStatus;
+      for (const k of ["agy", "codex", "claude"]) {
+        const dot = $(`authDot-${k}`);
+        if (!dot) continue;
+        if (!st || !st[k]) {
+          dot.style.color = "var(--muted)";
+          dot.title = "Click Check Auth Status";
+        } else if (st[k].authenticated) {
+          dot.style.color = "var(--mint-ink)";
+          dot.title = st[k].summary || "Authenticated";
+        } else {
+          dot.style.color = "var(--peach-ink)";
+          dot.title = st[k].summary || "Not logged in";
+        }
+      }
+    }
+
+    function renderCliToolPanel() {
+      const tool = state.activeCliTool || "agy";
+      document.querySelectorAll(".cli-tool-tab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.tool === tool);
+      });
+      const spec = CLI_CATALOG[tool] || CLI_CATALOG.agy;
+      const authInfo = state.cliAuthStatus?.[tool];
+      const authBadge = authInfo
+        ? `<span class="pill ${authInfo.authenticated ? "ok" : "warn"}"><span class="dot"></span>${esc(authInfo.summary)}</span>`
+        : "";
+
+      $("cliToolPanel").innerHTML = `
+        <div class="cli-groups">
+          ${spec.groups.map((g, gi) => `
+            <div class="cli-group">
+              <div class="cli-group-title">
+                <span>${esc(g.title)}</span>
+                ${gi === 0 ? authBadge : ""}
+              </div>
+              <div class="cli-action-row">
+                ${g.actions.map((a, ai) => `
+                  <button type="button" class="act-btn ${a.kind || ""}" data-gi="${gi}" data-ai="${ai}" title="${esc(a.cmd)}">
+                    ${esc(a.label)}
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <p class="cli-hint" style="margin-bottom:10px">${esc(spec.authNote)}</p>
+      `;
+
+      $("cliToolPanel").querySelectorAll(".act-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const action = spec.groups[Number(btn.dataset.gi)].actions[Number(btn.dataset.ai)];
+          if (action.confirm && !confirm(action.confirm)) return;
+          $("cliCmdInput").value = action.cmd;
+          if (action.hint) showToast(action.hint);
+          void executeCliCommand(action.cmd);
+        });
+      });
+      updateAuthDots();
+    }
+
+    async function refreshCliAuthStatus(silent = false) {
+      const btn = $("checkAuthBtn");
+      if (btn) btn.textContent = "Checking…";
+      try {
+        const res = await fetch("/api/cli/auth-status", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok) {
+            state.cliAuthStatus = data.authStatus;
+            renderCliToolPanel();
+            if (!silent) showToast("CLI auth status updated");
+          }
+        }
+      } finally {
+        if (btn) btn.textContent = "Check Auth Status";
+      }
+    }
+
+    function checkOAuthHelperHighlight(text) {
+      const box = $("oauthHelperBox");
+      if (!box) return;
+      const needsCb = /127\.0\.0\.1:\d+|localhost:\d+|redirect_uri=http%3A%2F%2F127\.0\.0\.1/i.test(String(text || ""));
+      box.classList.toggle("highlight", needsCb);
+    }
+
+    async function executeCliCommand(command) {
+      const cmd = String(command || "").trim();
+      if (!cmd) return;
+      const res = await fetch("/api/cli/exec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: cmd }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(data.error || "Failed to start CLI command");
+        return;
+      }
+      if (Array.isArray(data.sessions)) state.cliSessions = data.sessions;
+      state.selectedCliId = data.session.id;
+      renderCliSessions();
+      $("cliTermTitle").textContent = `$ ${data.session.command} [running]`;
+      $("cliTermBody").innerHTML = linkifyTerminal(data.output || "");
+      checkOAuthHelperHighlight(data.output || "");
+      scheduleCliWatch(data.session.id);
+    }
+
+    async function sendCliRawInput(data, appendNewline = false) {
+      if (!state.selectedCliId) {
+        showToast("Start or select a running CLI session first");
+        return false;
+      }
+      const res = await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data, appendNewline }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || "CLI session is not accepting input");
+        return false;
+      }
+      if (!state.wsConnected) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
+      return true;
+    }
+
+    document.querySelectorAll(".cli-tool-tab").forEach((el) => {
+      el.addEventListener("click", () => {
+        state.activeCliTool = el.dataset.tool || "agy";
+        renderCliToolPanel();
       });
     });
+    $("checkAuthBtn").addEventListener("click", () => void refreshCliAuthStatus(false));
 
     $("oauthCbForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -861,63 +1140,44 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
         return;
       }
       $("oauthCbInput").value = "";
+      $("oauthHelperBox").classList.remove("highlight");
       showToast("OAuth callback delivered (HTTP " + data.status + ")!");
       if (state.selectedCliId) setTimeout(() => void fetchCliSession(state.selectedCliId, true), 400);
+      setTimeout(() => void refreshCliAuthStatus(true), 1200);
     });
 
     $("cliForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const command = $("cliCmdInput").value.trim();
-      if (!command) return;
-      const res = await fetch("/api/cli/exec", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        showToast(data.error || "Failed to start CLI command");
-        return;
-      }
-      if (Array.isArray(data.sessions)) state.cliSessions = data.sessions;
-      state.selectedCliId = data.session.id;
-      renderCliSessions();
-      $("cliTermTitle").textContent = `$ ${data.session.command} [running]`;
-      $("cliTermBody").innerHTML = linkifyTerminal(data.output || "");
-      scheduleCliWatch(data.session.id);
+      await executeCliCommand($("cliCmdInput").value);
     });
 
     $("cliStdinForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (!state.selectedCliId) return;
       const val = $("cliStdinInput").value;
-      const res = await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: val, appendNewline: true }),
-      });
-      if (res.ok) {
-        $("cliStdinInput").value = "";
-        setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
-      } else {
-        const d = await res.json().catch(() => ({}));
-        showToast(d.error || "Unable to send input");
-      }
+      const ok = await sendCliRawInput(val, true);
+      if (ok) $("cliStdinInput").value = "";
     });
 
-    $("cliCtrlCBtn").addEventListener("click", async () => {
-      if (!state.selectedCliId) return;
-      await fetch(`/api/cli/sessions/${encodeURIComponent(state.selectedCliId)}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: "\x03", appendNewline: false }),
+    const PTY_KEYS = {
+      enter: "\r",
+      up: "\x1b[A",
+      down: "\x1b[B",
+      logout: "/logout\r",
+      exit: "/exit\r",
+      ctrld: "\x04",
+      ctrlc: "\x03",
+    };
+    document.querySelectorAll(".key-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const seq = PTY_KEYS[btn.dataset.key];
+        if (seq !== undefined) void sendCliRawInput(seq, false);
       });
-      setTimeout(() => void fetchCliSession(state.selectedCliId, true), 300);
     });
 
     $("cliRefreshBtn").addEventListener("click", () => {
       if (state.selectedCliId) void fetchCliSession(state.selectedCliId);
     });
+    renderCliToolPanel();
 
     function tryConnectWs() {
       if (state.viaProxy) {
@@ -946,6 +1206,7 @@ GIGBOTIC_WEBHOOK_SECRET=whsec_..."></textarea>
             const body = $("cliTermBody");
             const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
             body.innerHTML += linkifyTerminal(msg.payload.text || "");
+            checkOAuthHelperHighlight(body.textContent);
             if (nearBottom) body.scrollTop = body.scrollHeight;
           }
           else if (msg.type === "settings") { state.settings = msg.payload; $("concurrencySelect").value = String(state.settings.maxConcurrency || 2); }

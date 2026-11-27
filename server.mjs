@@ -776,8 +776,97 @@ function stripAnsiForWeb(text) {
   return String(text || "")
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[()#][0-9A-Za-z]/g, "")
+    .replace(/\x1b[=>]/g, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
+}
+
+function runQuickProbe(binName, args, timeoutMs = 4500) {
+  return new Promise((resolve) => {
+    const full = path.join(BIN_DIR, binName);
+    if (!fs.existsSync(full)) {
+      resolve({ installed: false, authenticated: false, summary: "Not installed" });
+      return;
+    }
+    const child = spawn(full, args, {
+      cwd: HOME_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        HOME: HOME_DIR,
+        XDG_CONFIG_HOME: path.join(HOME_DIR, ".config"),
+        PATH: `${BIN_DIR}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
+      },
+    });
+    let out = "";
+    const timer = setTimeout(() => {
+      try { child.kill("SIGTERM"); } catch {}
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => { out += d.toString("utf8"); });
+    child.stderr?.on("data", (d) => { out += d.toString("utf8"); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const clean = stripAnsiForWeb(out).trim();
+      resolve({ installed: true, code, output: clean });
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve({ installed: false, code: 1, output: "" });
+    });
+  });
+}
+
+async function getCliAuthStatus() {
+  const [codexRes, claudeRes, agyRes] = await Promise.all([
+    runQuickProbe("codex", ["login", "status"]),
+    runQuickProbe("claude", ["auth", "status"]),
+    runQuickProbe("agy", ["models"], 5500),
+  ]);
+
+  const codexLoggedIn = codexRes.installed && codexRes.code === 0 && /logged in/i.test(codexRes.output);
+  let claudeLoggedIn = false;
+  let claudeSummary = claudeRes.installed ? "Not logged in" : "Not installed";
+  if (claudeRes.installed) {
+    try {
+      const parsed = JSON.parse(claudeRes.output);
+      claudeLoggedIn = Boolean(parsed.loggedIn);
+      claudeSummary = claudeLoggedIn
+        ? `Logged in${parsed.email ? ` (${parsed.email})` : parsed.authMethod ? ` (${parsed.authMethod})` : ""}`
+        : "Not logged in";
+    } catch {
+      claudeLoggedIn = claudeRes.code === 0 && /logged\s*in|authenticated/i.test(claudeRes.output) && !/not logged in|loggedIn["']?\s*:\s*false/i.test(claudeRes.output);
+      claudeSummary = claudeLoggedIn ? "Logged in" : "Not logged in";
+    }
+  }
+
+  const agyLoggedIn =
+    agyRes.installed &&
+    agyRes.code === 0 &&
+    agyRes.output.length > 0 &&
+    !/not\s+(?:logged|signed)\s+in|authenticate|sign\s+in/i.test(agyRes.output);
+
+  return {
+    codex: {
+      installed: codexRes.installed,
+      authenticated: codexLoggedIn,
+      summary: codexRes.installed
+        ? (codexRes.output.split("\n")[0] || (codexLoggedIn ? "Logged in" : "Not logged in")).slice(0, 80)
+        : "Not installed",
+    },
+    claude: {
+      installed: claudeRes.installed,
+      authenticated: claudeLoggedIn,
+      summary: claudeSummary.slice(0, 80),
+    },
+    agy: {
+      installed: agyRes.installed,
+      authenticated: agyLoggedIn,
+      summary: agyRes.installed
+        ? (agyLoggedIn ? "Authenticated" : "Not signed in (click Login)")
+        : "Not installed",
+    },
+  };
 }
 
 function summarizeCliSession(s) {
@@ -834,6 +923,9 @@ function startCliSession(command, requestedCwd) {
     NPM_CONFIG_PREFIX: path.join(HOME_DIR, ".local"),
     NPM_CONFIG_CACHE: path.join(HOME_DIR, ".npm"),
     PM2_HOME: path.join(HOME_DIR, ".pm2"),
+    SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 22",
+    SSH_TTY: "/dev/pts/0",
+    NO_BROWSER: "1",
     TERM: "xterm-256color",
     COLUMNS: "120",
     LINES: "34",
@@ -1228,6 +1320,12 @@ const server = http.createServer(async (req, res) => {
 
     
     // Interactive CLI Terminal routes (authenticated + same-origin CSRF verified)
+    if (req.method === "GET" && p === "/api/cli/auth-status") {
+      const authStatus = await getCliAuthStatus();
+      sendJson(res, 200, { ok: true, authStatus });
+      return;
+    }
+
     if (req.method === "GET" && p === "/api/cli/sessions") {
       sendJson(res, 200, { ok: true, sessions: listCliSessionsSummary() });
       return;
