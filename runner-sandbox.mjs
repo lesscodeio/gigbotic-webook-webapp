@@ -852,7 +852,7 @@ export function buildAgySessionSettings({ executionPolicy }) {
   let permissions;
   if (isMcpOnly) {
     permissions = {
-      allow: ["mcp:gigbotic:*"],
+      allow: ["mcp(gigbotic/*)"],
       deny: [
         "command(*)",
         "run_command(*)",
@@ -866,7 +866,7 @@ export function buildAgySessionSettings({ executionPolicy }) {
     };
   } else if (isReadOnly) {
     permissions = {
-      allow: ["mcp:gigbotic:*", "read_file(*)"],
+      allow: ["mcp(gigbotic/*)", "read_file(*)"],
       deny: [
         "command(*)",
         "run_command(*)",
@@ -878,21 +878,24 @@ export function buildAgySessionSettings({ executionPolicy }) {
       ],
     };
   } else {
+    const allow = ["mcp(gigbotic/*)", "read_file(*)", "write_file(*)"];
     const deny = [];
-    if (!executionPolicy.allowShell) {
+    if (executionPolicy.allowShell) {
+      allow.push("command(*)");
+    } else {
       deny.push("command(*)", "run_command(*)");
     }
     if (executionPolicy.networkPolicy === "locked") {
       deny.push("web_fetch(*)", "web_search(*)", "read_url_content(*)");
     }
     permissions = {
-      allow: ["mcp:gigbotic:*"],
+      allow,
       ...(deny.length > 0 ? { deny } : {}),
     };
   }
 
   return {
-    agentMode: isMcpOnly ? "plan" : "auto",
+    agentMode: "auto",
     enableTerminalSandbox: true,
     allowNonWorkspaceAccess: false,
     toolPermission: "proceed-in-sandbox",

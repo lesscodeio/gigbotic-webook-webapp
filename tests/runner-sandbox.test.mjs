@@ -101,8 +101,10 @@ describe("Layer 4 — CLI Sandbox Flag Matrix (zero --dangerously-* flags)", () 
           assert.ok(!inv.args.includes("--mode"));
           const agySettings = buildAgySessionSettings({ executionPolicy: policy });
           assert.equal(agySettings.mcpServers, undefined, "agy --settings rejects mcpServers");
+          assert.ok(agySettings.permissions.allow.includes("mcp(gigbotic/*)"));
           if (sandboxMode === "mcp_only") {
-            assert.equal(agySettings.agentMode, "plan");
+            assert.ok(agySettings.permissions.deny.includes("command(*)"));
+            assert.ok(agySettings.permissions.deny.includes("write_file(*)"));
           }
         }
       });
