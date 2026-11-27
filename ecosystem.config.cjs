@@ -4,6 +4,25 @@ const os = require("node:os");
 const HOME_DIR = process.env.HOME || os.homedir();
 const BIN_DIR = path.join(HOME_DIR, ".local", "bin");
 
+const OPTIONAL_SANDBOX_ENV_KEYS = [
+  "GIGBOTIC_SANDBOX_DRIVER",
+  "GIGBOTIC_REQUIRE_DOCKER",
+  "GIGBOTIC_RUNNER_IMAGE",
+  "GIGBOTIC_DOCKER_MEMORY",
+  "GIGBOTIC_DOCKER_CPUS",
+  "GIGBOTIC_DOCKER_PIDS_LIMIT",
+  "GIGBOTIC_DOCKER_TMPFS_SIZE",
+  "GIGBOTIC_DOCKER_GPUS",
+  "GIGBOTIC_EGRESS_PROXY_PORT",
+];
+
+const optionalSandboxEnv = {};
+for (const key of OPTIONAL_SANDBOX_ENV_KEYS) {
+  if (process.env[key] !== undefined && process.env[key] !== "") {
+    optionalSandboxEnv[key] = process.env[key];
+  }
+}
+
 module.exports = {
   apps: [
     {
@@ -26,6 +45,7 @@ module.exports = {
         UI_HOST: process.env.UI_HOST || "127.0.0.1",
         UI_PORT: process.env.UI_PORT || "3450",
         PATH: `${BIN_DIR}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
+        ...optionalSandboxEnv,
       },
     },
   ],
